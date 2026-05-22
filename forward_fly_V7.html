@@ -1,0 +1,5025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>肥啾向前飞</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    canvas {
+      image-rendering: auto;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3), 0 0 60px rgba(102, 126, 234, 0.3);
+      will-change: transform, opacity;
+      image-rendering: pixelated;
+      max-width: 100%;
+      max-height: 100%;
+      touch-action: manipulation;
+    }
+    /* 移动端优化：防止长按菜单、文字选择、双击缩放 */
+    canvas {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    
+    // 移动端适配：根据屏幕大小调整画布尺寸
+
+    /**
+     * resizeCanvas() — 响应式画布尺寸调整（适配移动端与桌面端）
+     *
+     * 根据设备类型（移动端/桌面端）和窗口尺寸，动态计算画布的 CSS 显示尺寸，
+     * 同时保持逻辑画布固定为 1000x600 像素。采用适配宽度优先策略：
+     * 先按宽度计算高度，若超出可用高度则切换为适配高度优先。
+     *
+     * 移动端使用 98% 视口宽度和 95% 视口高度（预留浏览器 UI 空间），
+     * 桌面端使用 95% 视口宽度和 90% 视口高度。
+     * 逻辑分辨率固定为 1000x600，与所有游戏坐标系统一。
+     * 通过设置 canvas.style.width/height 进行 CSS 缩放，而 canvas.width/height 保持逻辑值不变。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function resizeCanvas() {
+      const isMobile = 'ontouchstart' in window;
+      const maxWidth = Math.min(window.innerWidth * (isMobile ? 0.98 : 0.95), 1000);
+      const maxHeight = Math.min(window.innerHeight * (isMobile ? 0.95 : 0.9), 600);
+      const aspectRatio = 1000 / 600;
+      
+      let finalWidth = maxWidth;
+      let finalHeight = finalWidth / aspectRatio;
+      
+      if (finalHeight > maxHeight) {
+        finalHeight = maxHeight;
+        finalWidth = finalHeight * aspectRatio;
+      }
+      
+      canvas.width = 1000;
+      canvas.height = 600;
+      canvas.style.width = finalWidth + 'px';
+      canvas.style.height = finalHeight + 'px';
+    }
+    
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    const W = 1000, H = 600;
+
+    // roundRect 兼容性 polyfill（某些旧浏览器不支持此 API）
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+      CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        this.moveTo(x + r, y);
+        this.lineTo(x + w - r, y);
+        this.quadraticCurveTo(x + w, y, x + w, y + r);
+        this.lineTo(x + w, y + h - r);
+        this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        this.lineTo(x + r, y + h);
+        this.quadraticCurveTo(x, y + h, x, y + h - r);
+        this.lineTo(x, y + r);
+        this.quadraticCurveTo(x, y, x + r, y);
+        this.closePath();
+      };
+    }
+
+    /* ================================================================
+     *  二、游戏常量 — 这些都是"可以调的参数"，改这里就能调整游戏手感
+     * ================================================================ */
+
+    // ---- 场景模式常量 ----
+    const SCENES = {
+      DESERT: 'desert',
+      NIGHT: 'night',
+      DUNGEON: 'dungeon'
+    };
+
+    // ---- 难度级别常量 ----
+    const DIFFICULTY_LEVELS = {
+      LOW: 'low',
+      MEDIUM: 'medium',
+      HIGH: 'high'
+    };
+
+    // ---- 角色皮肤常量 ----
+    const SKINS = {
+      ORIGINAL: 'original',
+      YELLOW_CUTE: 'yellow_cute',
+      BLUE_BIRD: 'blue_bird',
+      PINK_PARROT: 'pink_parrot',
+      GREEN_FINCH: 'green_finch'
+    };
+
+    // ---- 皮肤配置 ----
+    const SKIN_CONFIG = {
+      [SKINS.ORIGINAL]: {
+        name: '经典肥啾',
+        bodyColor: '#fcdb5a',
+        wingColor: '#e8a838',
+        eyeColor: '#000',
+        beakColor: '#ff6b35',
+        featherColor: '#e8a838'
+      },
+      [SKINS.YELLOW_CUTE]: {
+        name: '萌黄肥啾',
+        bodyColor: '#fff176',
+        wingColor: '#ffeb3b',
+        eyeColor: '#333',
+        beakColor: '#ff9800',
+        featherColor: '#ffeb3b'
+      },
+      [SKINS.BLUE_BIRD]: {
+        name: '蓝色小鸟',
+        bodyColor: '#64b5f6',
+        wingColor: '#42a5f5',
+        eyeColor: '#1565c0',
+        beakColor: '#ff7043',
+        featherColor: '#42a5f5'
+      },
+      [SKINS.PINK_PARROT]: {
+        name: '粉色鹦鹉',
+        bodyColor: '#f48fb1',
+        wingColor: '#f06292',
+        eyeColor: '#880e4f',
+        beakColor: '#ffab91',
+        featherColor: '#f06292'
+      },
+      [SKINS.GREEN_FINCH]: {
+        name: '绿色雀鸟',
+        bodyColor: '#81c784',
+        wingColor: '#66bb6a',
+        eyeColor: '#1b5e20',
+        beakColor: '#ffca28',
+        featherColor: '#66bb6a'
+      }
+    };
+
+    // ---- 难度参数配置 ----
+    const DIFFICULTY_CONFIG = {
+      [DIFFICULTY_LEVELS.LOW]: {
+        initialGap: 320,
+        minGapBefore20S: 240,
+        minGapAfter20S: 240,
+        initialInterval: 200,
+        minIntervalBefore20S: 150,
+        minIntervalAfter20S: 150,
+        minObsCountBefore20S: 1,
+        minObsCountAfter20S: 1,
+        gapVariation: 30,
+        gapRandomOffset: 120,
+        initialSpeed: 4.0,
+        maxSpeed: 15,
+        speedInc: 0.0012,
+        gravity: 0.4,
+        lift: -2.4,
+        holdLift: -0.7,
+        safeFrames: 120,
+        hasTutorial: true
+      },
+      [DIFFICULTY_LEVELS.MEDIUM]: {
+        initialGap: 280,
+        minGapBefore20S: 200,
+        minGapAfter20S: 120,
+        initialInterval: 150,
+        minIntervalBefore20S: 100,
+        minIntervalAfter20S: 60,
+        minObsCountBefore20S: 2,
+        minObsCountAfter20S: 3,
+        gapVariation: 60,
+        gapRandomOffset: 150,
+        initialSpeed: 5.1,
+        maxSpeed: 18,
+        speedInc: 0.0020,
+        gravity: 0.46,
+        lift: -2.6,
+        holdLift: -0.8,
+        safeFrames: 120,
+        hasTutorial: false
+      },
+      [DIFFICULTY_LEVELS.HIGH]: {
+        initialGap: 192,
+        minGapBefore20S: 128,
+        minGapAfter20S: 64,
+        initialInterval: 100,
+        minIntervalBefore20S: 80,
+        minIntervalAfter20S: 40,
+        minObsCountBefore20S: 3,
+        minObsCountAfter20S: 4,
+        gapVariation: 90,
+        gapRandomOffset: 180,
+        initialSpeed: 7.44,
+        maxSpeed: 22,
+        speedInc: 0.0028,
+        gravity: 0.52,
+        lift: -2.8,
+        holdLift: -0.9,
+        safeFrames: 0,
+        hasTutorial: false
+      }
+    };
+
+    // ---- 肥啾位置 ----
+    const BIRD_X = Math.floor(W * 0.3);  // 肥啾固定在画布左边 30% 的位置（约 240px）
+    const GROUND_Y = H - 60;             // 地面的 Y 坐标（地面高度 60px）
+
+    // ---- 游戏速度基础值 ----
+    const DIFFICULTY_START = 1200; // 20秒后开始增加难度（60fps * 20秒 = 1200帧）
+
+    // ---- 障碍物 ----
+    const OBS_W = 48;         // 障碍物的宽度
+    const OBS_TYPES_PER_SCENE = 5;  // 每个场景的障碍物种类数
+
+    // ---- 起飞平台 ----
+    const PLATFORM_W = 200;   // 木质起飞平台的宽度
+    const PLATFORM_H = 34;    // 木质起飞平台的高度
+
+    // ---- 悬停 ----
+    const HOVER_FRAMES = 30;  // 飞到最高点后悬停多少帧（0.5 秒）
+    
+    // ---- 性能优化配置 ----
+    const MAX_PARTICLES = 60;  // 最大粒子数量限制（原100，减少40%）
+    const PARTICLE_CLEANUP_INTERVAL = 600; // 粒子清理间隔（帧数）
+    const OBSTACLE_LOD_DISTANCE = 300; // 障碍物距离鸟多远时简化绘制
+
+    // ---- 单选按钮配置 ----
+    const RADIO_BTN = {
+      radius: 12,
+      spacing: 80,
+      sceneY: H / 2 - 100,
+      difficultyY: H / 2 - 50,
+      touchRadius: 28  // 移动端触摸检测半径（比视觉半径大，方便点击）
+    };
+
+    // ---- 肥啾物理常量（从difficultyConfig动态获取）----
+    const GRAVITY = () => difficultyConfig.gravity;
+    const LIFT = () => difficultyConfig.lift;
+    const HOLD_LIFT = () => difficultyConfig.holdLift;
+    const MAX_UP = -12;      // 最大上升速度
+    const MAX_FALL = 15;     // 最大下落速度
+
+    // ---- 游戏速度常量（从difficultyConfig动态获取）----
+    const INITIAL_SPEED = () => difficultyConfig.initialSpeed;
+    const MAX_SPEED = () => difficultyConfig.maxSpeed;
+    const SPEED_INC = () => difficultyConfig.speedInc;
+    const INITIAL_GAP = () => difficultyConfig.initialGap;
+    const MIN_GAP_BEFORE_20S = () => difficultyConfig.minGapBefore20S;
+    const MIN_GAP_AFTER_20S = () => difficultyConfig.minGapAfter20S;
+    const INITIAL_INTERVAL = () => difficultyConfig.initialInterval;
+    const MIN_INTERVAL_BEFORE_20S = () => difficultyConfig.minIntervalBefore20S;
+    const MIN_INTERVAL_AFTER_20S = () => difficultyConfig.minIntervalAfter20S;
+    const MIN_OBS_COUNT_BEFORE_20S = () => difficultyConfig.minObsCountBefore20S;
+    const MIN_OBS_COUNT_AFTER_20S = () => difficultyConfig.minObsCountAfter20S;
+    const SAFE_FRAMES = () => difficultyConfig.safeFrames;
+
+    /* ================================================================
+     *  三、游戏变量 — 这些值会在游戏运行中不断变化
+     * ================================================================ */
+    let bird;            // 肥啾对象，包含位置、速度等信息
+    let obstacles;       // 障碍物数组，存储所有当前在屏幕上的障碍物
+    let clouds;          // 云朵数组，装饰用
+    let gameState;       // 游戏状态：'start'（开始界面）/'playing'（游戏中）/'dying'（死亡掉落）/'gameover'（结算）
+    let frameCount;      // 游戏运行了多少帧（1秒=60帧），用来算得分
+    let spaceHeld;       // 空格键是否正在被按住（true=按住，false=松开）
+    let gameSpeed;
+    let spawnTimer;      // 计时器，累计到一定值就生成一组新障碍物
+    let spawnInterval;
+    let gapSize;
+    let safeTimer;       // 安全保护倒计时，归零后才开启碰撞检测
+    let platformX;       // 起飞平台的 X 坐标，游戏开始后它会向左滚动
+    let lastTime;        // 上一帧的时间戳，用于计算时间差（确保不同设备速度一致）
+    let accumulatedTime; // 累积时间，用于固定时间步长更新
+    
+    // ---- 场景与难度变量 ----
+    let currentSceneMode;
+    let currentDifficulty;
+    let currentSkin;
+    let difficultyConfig;
+    
+    // ---- 音频相关变量 ----
+    let audioContext;    // Web Audio API 上下文
+    let bgmOscillator;   // 背景音乐振荡器
+    let bgmGain;         // 背景音乐音量控制
+    let isMuted = false; // 静音开关
+    
+    // ---- 粒子系统 ----
+    let particles = [];  // 粒子数组
+    
+    // ---- 性能优化：离屏canvas缓存 ----
+    let backgroundCache = null;  // 背景缓存canvas
+    let cacheDirty = true;       // 缓存是否需要更新
+    let lastCacheFrame = 0;      // 上次缓存更新的帧数
+    
+    // ---- 教程相关 ----
+    let tutorialTimer = 0; // 教程显示计时器
+    
+    // ---- 按钮交互状态 ----
+    let mouseX = 0;
+    let mouseY = 0;
+    let isHoveringStartBtn = false;
+    let isHoveringRestartBtn = false;
+    let isHoveringReturnBtn = false;
+
+    /* ================================================================
+     *  三.五、设置管理 — 从localStorage加载和保存玩家设置
+     * ================================================================ */
+
+
+    /**
+     * loadSettings() — 从 localStorage 加载玩家偏好设置
+     *
+     * 读取 fatBirdSettings 键并解析 JSON，恢复场景模式、难度级别和角色皮肤。
+     * 若读取失败（首次运行、数据损坏或隐私模式），使用默认值：
+     * - 场景：沙漠 (SCENES.DESERT)
+     * - 难度：中等 (DIFFICULTY_LEVELS.MEDIUM)
+     * - 皮肤：经典肥啾 (SKINS.ORIGINAL)
+     * 最后根据 currentDifficulty 更新 difficultyConfig 引用。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function loadSettings() {
+      try {
+        const saved = localStorage.getItem('fatBirdSettings');
+        if (saved) {
+          const settings = JSON.parse(saved);
+          currentSceneMode = settings.scene || SCENES.DESERT;
+          currentDifficulty = settings.difficulty || DIFFICULTY_LEVELS.MEDIUM;
+          currentSkin = settings.skin || SKINS.ORIGINAL;
+        } else {
+          currentSceneMode = SCENES.DESERT;
+          currentDifficulty = DIFFICULTY_LEVELS.MEDIUM;
+          currentSkin = SKINS.ORIGINAL;
+        }
+      } catch (e) {
+        currentSceneMode = SCENES.DESERT;
+        currentDifficulty = DIFFICULTY_LEVELS.MEDIUM;
+        currentSkin = SKINS.ORIGINAL;
+      }
+      difficultyConfig = DIFFICULTY_CONFIG[currentDifficulty];
+    }
+
+
+    /**
+     * seededRandom() — 基于种子的伪随机数生成器（确保绘制结果稳定不闪烁）
+     *
+     * 使用正弦哈希函数生成 0~1 之间的伪随机数。
+     * 数学原理：sin(seed * 12.9898 + seed * 78.233) * 43758.5453，取小数部分。
+     * 相同的种子始终产生相同的结果，保证障碍物的绘制细节（纹理/装饰）
+     * 不随帧率波动或位置移动而变化。
+     *
+     * @param {number} seed — 任意数值种子
+     * @returns {number} [0, 1) 区间内的伪随机数
+     */
+    function seededRandom(seed) {
+      const x = Math.sin(seed * 12.9898 + seed * 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    }
+
+
+    /**
+     * saveSettings() — 将当前偏好设置持久化到 localStorage
+     *
+     * 序列化 scene/difficulty/skin 为 JSON 存入 fatBirdSettings 键。
+     * 若存储失败（如配额超限），静默捕获异常并输出控制台日志，不影响游戏运行。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function saveSettings() {
+      try {
+        localStorage.setItem('fatBirdSettings', JSON.stringify({
+          scene: currentSceneMode,
+          difficulty: currentDifficulty,
+          skin: currentSkin
+        }));
+      } catch (e) {
+        console.log('无法保存设置');
+      }
+    }
+
+
+    /**
+     * setSceneMode() — 切换游戏场景模式
+     *
+     * 仅在场景值实际发生变化时执行操作：更新 currentSceneMode、
+     * 标记背景缓存为脏（cacheDirty = true，使下次 drawBackground() 重建缓存）、
+     * 持久化设置、播放场景切换音效。
+     *
+     * @param {string} scene — 目标场景键名（SCENES 常量之一）
+     * 返回：无
+     */
+    function setSceneMode(scene) {
+      if (currentSceneMode !== scene) {
+        currentSceneMode = scene;
+        cacheDirty = true;
+        saveSettings();
+        playSceneSound(scene);
+      }
+    }
+
+
+    /**
+     * setDifficulty() — 切换游戏难度级别
+     *
+     * 更新 currentDifficulty 和 difficultyConfig（指向 DIFFICULTY_CONFIG 对应条目），
+     * 持久化设置并播放切换音效。难度变更在下次调用 reset() 时完全生效。
+     *
+     * @param {string} difficulty — 目标难度键名（DIFFICULTY_LEVELS 常量之一）
+     * 返回：无
+     */
+    function setDifficulty(difficulty) {
+      if (currentDifficulty !== difficulty) {
+        currentDifficulty = difficulty;
+        difficultyConfig = DIFFICULTY_CONFIG[difficulty];
+        saveSettings();
+        playDifficultySound(difficulty);
+      }
+    }
+
+
+    /**
+     * setSkin() — 切换角色皮肤
+     *
+     * 更新 currentSkin 引用，持久化设置并播放切换音效。
+     * 皮肤变更立即反映在 drawBird() 中（使用 SKIN_CONFIG 的对应颜色配置）。
+     *
+     * @param {string} skin — 目标皮肤键名（SKINS 常量之一）
+     * 返回：无
+     */
+    function setSkin(skin) {
+      if (currentSkin !== skin) {
+        currentSkin = skin;
+        saveSettings();
+        playSkinSound(skin);
+      }
+    }
+
+
+    /**
+     * createParticles() — 生成粒子效果（带最大数量限制的 FIFO 淘汰策略）
+     *
+     * 在指定位置生成 count 个随机方向、随机速度的粒子。
+     * 粒子速度使用极坐标：随机角度 [0, 2pi) + 随机模长 [1, 4)，vy 额外加 -2 产生向上喷射感。
+     * 若当前粒子总数已达 MAX_PARTICLES(60)，先移除数组最前端的 count 个最旧粒子，
+     * 确保内存占用可控。
+     *
+     * @param {number} x — 粒子发射中心 X 坐标
+     * @param {number} y — 粒子发射中心 Y 坐标
+     * @param {number} count — 本次生成的粒子数量
+     * @param {string} type — 粒子类型：jump(跳跃) / crash(碰撞) / score(得分)
+     * 返回：无（粒子被 push 到全局 particles 数组）
+     */
+    function createParticles(x, y, count, type) {
+      // 限制最大粒子数量
+      if (particles.length >= MAX_PARTICLES) {
+        // 移除最旧的粒子
+        particles.splice(0, count);
+      }
+      
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * 3;
+        particles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 2,
+          life: 30 + Math.random() * 20,
+          maxLife: 50,
+          size: 2 + Math.random() * 4,
+          type: type, // 'jump', 'crash', 'score'
+          color: getParticleColor(type)
+        });
+      }
+    }
+
+
+    /**
+     * getParticleColor() — 根据粒子类型返回候选颜色数组
+     *
+     * 每种类型提供 2~3 种颜色，绘制时基于位置和生命期的哈希值从中选取，
+     * 使粒子群呈现丰富的色彩变化。
+     *
+     * @param {string} type — 粒子类型
+     * @returns {string[]} 十六进制颜色字符串数组
+     */
+    function getParticleColor(type) {
+      switch(type) {
+        case 'jump': return ['#ffe066', '#ffcc00', '#fff9e6'];
+        case 'crash': return ['#ff6b6b', '#ff4444', '#ff8888'];
+        case 'score': return ['#66ff66', '#44ff44', '#88ff88'];
+        default: return ['#ffffff'];
+      }
+    }
+
+
+    /**
+     * updateParticles() — 更新所有粒子状态（使用就地过滤算法优化性能）
+     *
+     * 核心算法：就地过滤（in-place filtering）
+     * - 用游标 aliveCount 记录存活粒子数
+     * - 遍历数组时，存活粒子紧凑排列到数组前端（particles[aliveCount] = p）
+     * - 最终直接截断数组长度（particles.length = aliveCount）
+     * 这种方式避免了 splice() 删除元素时的数组元素移动开销。
+     *
+     * 每帧给粒子施加 0.1 的重力（vy += 0.1），同时 life 递减，
+     * 当 life <= 0 时粒子死亡。
+     *
+     * 参数：无（操作全局 particles 数组）
+     * 返回：无
+     */
+    function updateParticles() {
+      // 提前计算重力值
+      const gravity = 0.1;
+      
+      // 直接遍历并过滤，减少数组操作
+      let aliveCount = 0;
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += gravity;
+        p.life--;
+        
+        if (p.life > 0) {
+          if (aliveCount !== i) {
+            particles[aliveCount] = p;
+          }
+          aliveCount++;
+        }
+      }
+      
+      // 直接截断数组，避免splice的性能开销
+      particles.length = aliveCount;
+    }
+
+
+    /**
+     * drawParticles() — 绘制所有粒子（按 alpha 分组批量绘制优化）
+     *
+     * 将粒子按当前透明度（alpha = life / maxLife）分配到 6 个预定义级别
+     * （0.1/0.3/0.5/0.7/0.9/1.0），同一级别一次性设置 globalAlpha 后批量绘制所有粒子，
+     * 大幅减少 Canvas 状态切换次数。
+     *
+     * 粒子大小随生命值等比缩小：size *= life / maxLife（最小为 0）。
+     * 颜色通过 (x * 7 + y * 3 + life) 取模从候选数组中选取，不同粒子颜色随机分布。
+     *
+     * 参数：无（读取全局 particles 数组）
+     * 返回：无
+     */
+    function drawParticles() {
+      const len = particles.length;
+      if (len === 0) return;
+      
+      // 按alpha范围分组绘制，减少globalAlpha切换次数
+      const alphaGroups = {};
+      const alphaLevels = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0];
+      
+      for (let i = 0; i < len; i++) {
+        const p = particles[i];
+        const alpha = p.life / p.maxLife;
+        
+        // 找到最接近的alpha级别
+        let level = 0;
+        for (let j = 0; j < alphaLevels.length; j++) {
+          if (alpha >= alphaLevels[j]) {
+            level = alphaLevels[j];
+          }
+        }
+        
+        if (!alphaGroups[level]) {
+          alphaGroups[level] = [];
+        }
+        alphaGroups[level].push(p);
+      }
+      
+      // 按alpha级别批量绘制
+      for (const alpha in alphaGroups) {
+        ctx.globalAlpha = parseFloat(alpha);
+        const group = alphaGroups[alpha];
+        
+        for (const p of group) {
+          const size = Math.max(0, p.size * (p.life / p.maxLife));
+          ctx.fillStyle = p.color[Math.floor((p.x * 7 + p.y * 3 + p.life) % p.color.length)];
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      ctx.globalAlpha = 1;
+    }
+
+    /* ================================================================
+     *  四、reset() — 重置所有数据到初始状态（每次重新开始游戏时调用）
+     * ================================================================ */
+
+    /**
+     * reset() — 重置所有游戏数据到初始状态（每次重新开始/返回主菜单时调用）
+     *
+     * 初始化/重置以下变量：
+     * - 肥啾：位置在平台正上方，速度归零，翅膀在上位，旋转归零
+     * - 障碍物数组清空
+     * - 云朵根据当前场景重新生成
+     * - 游戏状态设为 start（开始界面）
+     * - 帧计数器归零，spaceHeld 为 false
+     * - 游戏速度设为 INITIAL_SPEED，生成计时器/间隔/间隙恢复初始值
+     * - 安全计时器归零，累积时间清零，lastTime 重置
+     * - 平台位置居中于鸟下方
+     * - 粒子数组清空，背景缓存标记为脏
+     * - 停止正在播放的背景音乐
+     * - 调用 generateSceneElements() 生成场景背景元素
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function reset() {
+      // 加载保存的设置
+      loadSettings();
+      
+      // ---- 肥啾的初始属性 ----
+      bird = {
+        x: BIRD_X,                              // X 固定不变
+        y: GROUND_Y - PLATFORM_H - 24,          // Y：站在平台上面（24 是鸟的高度）
+        w: 28, h: 24,                           // 鸟的宽和高（像素）
+        vy: 0,                                  // 垂直速度，初始为 0
+        rotation: 0,                            // 旋转角度，死亡翻转用
+        wingFrame: 0,                           // 翅膀动画帧（0=上，1=下）
+        wingTimer: 0,                           // 翅膀动画计时器
+        hoverTimer: 0                           // 悬停计时器
+      };
+      obstacles = [];          // 清空障碍物
+      clouds = [];             // 重新生成云朵
+      gameState = 'start';     // 回到开始界面
+      frameCount = 0;          // 帧数归零
+      spaceHeld = false;       // 空格未按下
+      gameSpeed = difficultyConfig.initialSpeed;
+      spawnTimer = 0;
+      spawnInterval = difficultyConfig.initialInterval;
+      gapSize = difficultyConfig.initialGap;
+      safeTimer = 0;
+      accumulatedTime = 0;     // 初始化累积时间
+      lastTime = performance.now();  // 初始化时间戳
+      tutorialTimer = 0;       // 重置教程计时器
+      // 平台位置：以鸟为中心，向左偏移半个平台宽度
+      platformX = BIRD_X - Math.floor(PLATFORM_W / 2) + 14;
+      particles = [];  // 清空粒子
+      cacheDirty = true;  // 标记缓存需要更新
+
+      // 停止背景音乐
+      stopBGM();
+
+      // 生成场景特定的背景元素
+      generateSceneElements();
+    }
+
+
+    /**
+     * generateSceneElements() — 根据当前场景模式生成背景装饰元素
+     *
+     * 清空 clouds 数组后，根据 currentSceneMode 生成：
+     * - DESERT：4 朵卷云，随机位置 (x: 0~W, y: 50~170)、大小和移动速度
+     * - NIGHT：50 颗星星，带闪烁相位 twinkle 和 twinkleSpeed，尺寸 1~3px
+     * - DUNGEON：沿水平均匀分布的火把（每 200px 一个），带摇曳相位 flicker
+     *
+     * 参数：无（读取 currentSceneMode，写入全局 clouds 数组）
+     * 返回：无
+     */
+    function generateSceneElements() {
+      clouds = [];
+      
+      if (currentSceneMode === SCENES.DESERT) {
+        // 沙漠模式：卷云
+        for (let i = 0; i < 4; i++) {
+          clouds.push({
+            x: Math.random() * W,
+            y: 50 + Math.random() * 120,
+            w: 60 + Math.random() * 80,
+            h: 8 + Math.random() * 6,
+            speed: 0.15 + Math.random() * 0.3,
+            type: 'desert'
+          });
+        }
+      } else if (currentSceneMode === SCENES.NIGHT) {
+        // 黑夜模式：星星
+        for (let i = 0; i < 50; i++) {
+          clouds.push({
+            x: Math.random() * W,
+            y: 20 + Math.random() * 200,
+            w: 1 + Math.random() * 2,
+            h: 1 + Math.random() * 2,
+            speed: 0.02 + Math.random() * 0.05,
+            type: 'star',
+            twinkle: Math.random() * Math.PI * 2,
+            twinkleSpeed: 0.02 + Math.random() * 0.03
+          });
+        }
+      } else if (currentSceneMode === SCENES.DUNGEON) {
+        // 地下城模式：火把
+        for (let i = 0; i < Math.ceil(W / 200) + 1; i++) {
+          clouds.push({
+            x: i * 200 + Math.random() * 50 - 100,
+            y: 80 + Math.random() * 60,
+            w: 30,
+            h: 60,
+            speed: gameSpeed * 0.3,
+            type: 'torch',
+            flicker: Math.random() * Math.PI * 2
+          });
+        }
+      }
+    }
+
+    /* ================================================================
+     *  四.五、音频系统 — 使用 Web Audio API 生成音效和背景音乐
+     * ================================================================ */
+
+
+    /**
+     * playSceneSound() — 播放场景切换音效（Web Audio API 一次性振荡器）
+     *
+     * 不同场景模拟不同自然音色：
+     * - DESERT：锯齿波模拟风声（150Hz 平滑降至 100Hz，持续 0.3 秒）
+     * - NIGHT：正弦波模拟猫头鹰叫声（400->350->380Hz 啁啾，持续 0.4 秒）
+     * - DUNGEON：正弦波模拟滴水声（800Hz 短促衰减，持续 0.1 秒）
+     *
+     * @param {string} scene — 目标场景键名
+     * 返回：无
+     */
+    function playSceneSound(scene) {
+      if (!audioContext || isMuted) return;
+      
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      switch(scene) {
+        case SCENES.DESERT:
+          // 风声效果
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(150, audioContext.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.3);
+          gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+          break;
+        case SCENES.NIGHT:
+          // 猫头鹰叫声
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(400, audioContext.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(350, audioContext.currentTime + 0.2);
+          osc.frequency.exponentialRampToValueAtTime(380, audioContext.currentTime + 0.4);
+          gainNode.gain.setValueAtTime(0.25, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.4);
+          break;
+        case SCENES.DUNGEON:
+          // 滴水声
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(800, audioContext.currentTime);
+          gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+          break;
+      }
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.5);
+    }
+
+
+    /**
+     * playDifficultySound() — 播放难度切换音效
+     *
+     * 三种难度使用不同波形和频率走向表达不同情绪：
+     * - LOW：正弦波上升（880->1100Hz），音色轻快活泼
+     * - MEDIUM：正弦波平缓（660Hz 恒定），音色中性沉稳
+     * - HIGH：方波下降（440->330Hz），音色紧张压迫（方波富含奇次谐波）
+     *
+     * @param {string} difficulty — 目标难度键名
+     * 返回：无
+     */
+    function playDifficultySound(difficulty) {
+      if (!audioContext || isMuted) return;
+      
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      switch(difficulty) {
+        case DIFFICULTY_LEVELS.LOW:
+          // 轻快叮声
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, audioContext.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(1100, audioContext.currentTime + 0.1);
+          gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+          break;
+        case DIFFICULTY_LEVELS.MEDIUM:
+          // 中性提示音
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(660, audioContext.currentTime);
+          gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+          break;
+        case DIFFICULTY_LEVELS.HIGH:
+          // 紧张短促音
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(440, audioContext.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(330, audioContext.currentTime + 0.15);
+          gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+          break;
+      }
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.3);
+    }
+
+
+    /**
+     * playSkinSound() — 播放皮肤切换音效（C 大调三和弦上行琶音）
+     *
+     * 依次演奏 C5(523.25Hz) -> E5(659.25Hz) -> G5(783.99Hz)，
+     * 每个音间隔 0.05 秒，形成轻快可爱的上升和弦效果。
+     * 整体持续 0.25 秒后指数衰减。
+     *
+     * @param {string} skin — 目标皮肤键名
+     * 返回：无
+     */
+    function playSkinSound(skin) {
+      if (!audioContext || isMuted) return;
+      
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // 可爱音效
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5
+      osc.frequency.setValueAtTime(659.25, audioContext.currentTime + 0.05); // E5
+      osc.frequency.setValueAtTime(783.99, audioContext.currentTime + 0.1); // G5
+      
+      gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.25);
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.3);
+    }
+
+
+    /**
+     * initAudio() — 初始化 Web Audio API 上下文
+     *
+     * 创建 AudioContext（兼容 webkitAudioContext 前缀），
+     * 若上下文因浏览器自动播放策略被挂起（state === suspended），
+     * 调用 resume() 恢复。此函数必须在用户交互事件（click/touchstart）中调用，
+     * 因为现代浏览器禁止在未交互时创建或恢复音频上下文。
+     *
+     * 参数：无
+     * 返回：无（创建全局 audioContext 实例）
+     */
+    function initAudio() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      // 如果音频上下文被挂起，恢复它
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+    }
+
+
+    /**
+     * playJumpSound() — 播放跳跃音效（频率快速上升的正弦波）
+     *
+     * 正弦波从 600Hz 指数上升至 900Hz，持续 0.1 秒。
+     * 音量从 0.3 指数衰减至接近零，模拟鸟振翅腾空的轻快感。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function playJumpSound() {
+      if (!audioContext || isMuted) return;
+      
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, audioContext.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(900, audioContext.currentTime + 0.1);
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.1);
+    }
+
+
+    /**
+     * playHoverSound() — 播放悬停音效（柔和持续的三角波）
+     *
+     * 三角波（音色比正弦波更温暖，谐波少）以 400Hz 持续约 0.3 秒。
+     * 音量先线性保持 0.15 约 0.2 秒，再指数衰减，形成轻柔的悬浮效果。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function playHoverSound() {
+      if (!audioContext || isMuted) return;
+      
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(400, audioContext.currentTime);
+      
+      gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.15, audioContext.currentTime + 0.2);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.3);
+    }
+
+
+    /**
+     * playCrashSound() — 播放碰撞坠毁音效（粗糙滑降的锯齿波）
+     *
+     * 锯齿波（音色刺耳，含丰富的高次谐波）从 200Hz 指数降至 50Hz，
+     * 模拟撞击和坠落的声音效果。音量 0.4 持续 0.3 秒后衰减。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function playCrashSound() {
+      if (!audioContext || isMuted) return;
+      
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioContext.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(50, audioContext.currentTime + 0.3);
+      
+      gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.3);
+    }
+
+
+    /**
+     * playScoreSound() — 播放得分提示音（清脆的高音叮声）
+     *
+     * 纯正弦波 880Hz（A5 音），清脆短暂，持续 0.15 秒。
+     * 音量从 0.2 指数衰减，模拟硬币落罐或金币获得音效。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function playScoreSound() {
+      if (!audioContext || isMuted) return;
+      
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, audioContext.currentTime);
+      
+      gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.15);
+    }
+
+
+    /**
+     * playClickSound() — 播放按钮点击音效（高频快速扫描）
+     *
+     * 正弦波从 1200Hz 指数上升至 1500Hz，仅持续 0.1 秒。
+     * 模拟鼠标点击的清脆反馈，音量 0.25 快速衰减。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function playClickSound() {
+      if (!audioContext || isMuted) return;
+      
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, audioContext.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1500, audioContext.currentTime + 0.08);
+      
+      gainNode.gain.setValueAtTime(0.25, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.1);
+    }
+
+
+    /**
+     * startBGM() — 启动背景音乐（双振荡器叠加：主旋律 + 和声铺垫）
+     *
+     * 使用两个 Web Audio 振荡器同时发声：
+     * 1. 主旋律（正弦波，C5 起始）：演奏 20 音符的 C 大调序列
+     * 2. 和声（三角波，C4 起始）：演奏对应的低音进行
+     *
+     * 旋律结构（20 音，4 句，每音 0.35 秒）：
+     *   第一句：C5->E5->G5->E5->C5（欢快上升后回落，模仿鸟起飞）
+     *   第二句：D5->G5->A5->G5->E5（轻盈跳跃）
+     *   第三句：C5->D5->E5->G5->E5->D5（优美弧线）
+     *   第四句：C5->B4->A4->B4->C5（温馨收尾回到主音）
+     *
+     * 和声（三和弦根音进行，支持并烘托主旋律）：
+     *   C4->E4->G4->E4->C4 / D4->G4->A4->G4->E4 / ...
+     *
+     * 音符间使用 linearRampToValueAtTime 实现 0.05 秒平滑过渡，
+     * 避免频率阶跃产生刺耳的咔嗒声。
+     * 主旋律音量 0.03，和声音量 0.015，确保轻柔不刺耳。
+     * 使用递归 setTimeout 驱动音符序列。
+     *
+     * 参数：无（读取 audioContext, isMuted）
+     * 返回：无（设置 bgmOscillator, bgmGain）
+     */
+    function startBGM() {
+      if (!audioContext || isMuted || bgmOscillator) return;
+      
+      // 创建主旋律振荡器（使用方波，音色更清脆明亮）
+      const melodyOsc = audioContext.createOscillator();
+      const melodyGain = audioContext.createGain();
+      
+      melodyOsc.connect(melodyGain);
+      melodyGain.connect(audioContext.destination);
+      
+      melodyOsc.type = 'sine'; // 正弦波，柔和但不刺耳
+      melodyOsc.frequency.setValueAtTime(523, audioContext.currentTime); // C5
+      
+      melodyGain.gain.setValueAtTime(0.03, audioContext.currentTime); // 更低音量，非常轻柔
+      
+      melodyOsc.start();
+      
+      // 创建和声振荡器（温暖的低音铺垫）
+      const harmonyOsc = audioContext.createOscillator();
+      const harmonyGain = audioContext.createGain();
+      
+      harmonyOsc.connect(harmonyGain);
+      harmonyGain.connect(audioContext.destination);
+      
+      harmonyOsc.type = 'triangle'; // 三角波，作为柔和的低音基础
+      harmonyOsc.frequency.setValueAtTime(262, audioContext.currentTime); // C4
+      
+      harmonyGain.gain.setValueAtTime(0.015, audioContext.currentTime); // 极低音量
+      
+      harmonyOsc.start();
+      
+      // 保存引用以便停止
+      bgmOscillator = melodyOsc;
+      bgmGain = melodyGain;
+      
+      // 欢快优美的旋律序列（C大调，轻快活泼，像小鸟飞翔）
+      // 采用跳跃式的音符，更有活力感
+      let noteIndex = 0;
+      const melody = [
+        // 第一句：欢快上升（像小鸟起飞）
+        523, 659, 784,  // C5 E5 G5 - C大调和弦上行
+        659, 523,       // E5 C5 - 回落
+        
+        // 第二句：轻盈跳跃
+        587, 784, 880,  // D5 G5 A5
+        784, 659,       // G5 E5
+        
+        // 第三句：优美弧线
+        523, 587, 659,  // C5 D5 E5
+        784, 659, 587,  // G5 E5 D5
+        
+        // 第四句：温馨收尾
+        523, 494, 440,  // C5 B4 A4
+        494, 523        // B4 C5 - 回到主音
+      ];
+      
+      // 和声序列（简单的根音进行，支持主旋律）
+      const harmony = [
+        262, 330, 392,  // C4 E4 G4
+        330, 262,       // E4 C4
+        
+        294, 392, 440,  // D4 G4 A4
+        392, 330,       // G4 E4
+        
+        262, 294, 330,  // C4 D4 E4
+        392, 330, 294,  // G4 E4 D4
+        
+        262, 247, 220,  // C4 B3 A3
+        247, 262        // B3 C4
+      ];
+      
+      const noteDuration = 0.35; // 每个音符0.35秒，轻快的节奏
+      
+      function playNextNote() {
+        if (!bgmOscillator || isMuted) return;
+        
+        const melodyFreq = melody[noteIndex % melody.length];
+        const harmonyFreq = harmony[noteIndex % harmony.length];
+        
+        // 快速平滑过渡（让旋律更流畅）
+        const transitionTime = 0.05;
+        melodyOsc.frequency.linearRampToValueAtTime(melodyFreq, audioContext.currentTime + transitionTime);
+        harmonyOsc.frequency.linearRampToValueAtTime(harmonyFreq, audioContext.currentTime + transitionTime);
+        
+        noteIndex++;
+        
+        setTimeout(playNextNote, noteDuration * 1000);
+      }
+      
+      playNextNote();
+    }
+
+
+    /**
+     * stopBGM() — 停止背景音乐
+     *
+     * 停止并断开主旋律振荡器（melodyOsc）与音频输出链的连接，
+     * 清空引用变量。和声振荡器是 startBGM 内的局部变量，
+     * 当 startBGM 的闭包失去引用后会被 JavaScript 垃圾回收。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function stopBGM() {
+      if (bgmOscillator) {
+        try {
+          bgmOscillator.stop();
+          bgmOscillator.disconnect();
+        } catch(e) {}
+        bgmOscillator = null;
+        bgmGain = null;
+      }
+      // 注意：和声振荡器会在下次startBGM时自动替换
+    }
+
+
+    /**
+     * toggleMute() — 切换全局静音状态
+     *
+     * 静音开启时立即停止背景音乐；
+     * 静音关闭时若当前处于游戏中，重新启动背景音乐。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function toggleMute() {
+      isMuted = !isMuted;
+      if (isMuted) {
+        stopBGM();
+      } else if (gameState === 'playing') {
+        startBGM();
+      }
+    }
+
+    /* ================================================================
+     *  五、绘制函数 — 负责把所有东西画到画布上
+     * ================================================================ */
+
+
+    /**
+     * createBackgroundCache() — 创建离屏 Canvas 背景缓存（性能优化）
+     *
+     * 将静态背景（天空渐变、太阳/月亮/砖墙纹理等）绘制到一个离屏 canvas 上。
+     * 后续帧通过 drawImage 直接拷贝缓存，避免每帧重复执行大量 Canvas API 调用。
+     * 根据 currentSceneMode 分发到对应的背景绘制函数。
+     * 绘制结束后将 cacheDirty 设为 false。
+     *
+     * 参数：无（创建或复用全局 backgroundCache canvas）
+     * 返回：无
+     */
+    function createBackgroundCache() {
+      if (!backgroundCache) {
+        backgroundCache = document.createElement('canvas');
+        backgroundCache.width = W;
+        backgroundCache.height = H;
+      }
+      
+      const bgCtx = backgroundCache.getContext('2d');
+      
+      // 根据场景模式绘制背景
+      switch(currentSceneMode) {
+        case SCENES.DESERT:
+          drawDesertBackground(bgCtx);
+          break;
+        case SCENES.NIGHT:
+          drawNightBackground(bgCtx);
+          break;
+        case SCENES.DUNGEON:
+          drawDungeonBackground(bgCtx);
+          break;
+        default:
+          drawDefaultBackground(bgCtx);
+      }
+      
+      cacheDirty = false;
+    }
+
+
+    /**
+     * drawDesertBackground() — 在指定上下文上绘制沙漠场景静态背景
+     *
+     * 绘制层次（由远到近）：
+     * 1. 天空渐变：自上而下线性渐变，淡蓝(#87ceeb)->沙橙(#f0d0a0)->深沙(#f4a460)
+     * 2. 太阳：4 圈同心光晕环（半径递增 25px，透明度递减）
+     *    核心径向渐变（白->金黄->橙），半径 60px
+     *
+     * @param {CanvasRenderingContext2D} ctx — 目标绘图上下文
+     * 返回：无
+     */
+    function drawDesertBackground(ctx) {
+      // 天空渐变（淡蓝→沙橙）
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+      skyGrad.addColorStop(0, '#87ceeb');
+      skyGrad.addColorStop(0.5, '#f0d0a0');
+      skyGrad.addColorStop(1, '#f4a460');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // 太阳
+      const sunX = W - 100;
+      const sunY = 80;
+      for (let i = 3; i >= 0; i--) {
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, 60 + i * 25, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 180, 50, ${0.15 - i * 0.03})`;
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, 60, 0, Math.PI * 2);
+      const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 60);
+      sunGrad.addColorStop(0, '#fff9e6');
+      sunGrad.addColorStop(0.5, '#ffe066');
+      sunGrad.addColorStop(1, '#ffaa00');
+      ctx.fillStyle = sunGrad;
+      ctx.fill();
+    }
+
+
+    /**
+     * drawNightBackground() — 绘制黑夜场景静态背景
+     *
+     * 绘制层次：
+     * 1. 天空渐变：深青(#1a2930)渐变至纯黑(#0a1015)
+     * 2. 月亮：3 圈月光晕（透明度 0.12/0.07/0.02）+ 径向渐变月体 + 3 个月球环形山
+     *    - 月体渐变：上偏左为高光点，白->浅灰(#e8e8e8)->中灰(#c0c0c0)
+     *    - 环形山：3 个半透明深灰圆
+     *
+     * @param {CanvasRenderingContext2D} ctx — 目标绘图上下文
+     * 返回：无
+     */
+    function drawNightBackground(ctx) {
+      // 天空渐变（深青→黑）
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+      skyGrad.addColorStop(0, '#1a2930');
+      skyGrad.addColorStop(0.5, '#0d1a20');
+      skyGrad.addColorStop(1, '#0a1015');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // 月亮
+      const moonX = W - 120;
+      const moonY = 60;
+      const moonRadius = 40;
+      
+      // 月光晕
+      for (let i = 2; i >= 0; i--) {
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, moonRadius + i * 30, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(200, 220, 255, ${0.12 - i * 0.05})`;
+        ctx.fill();
+      }
+      
+      // 月亮主体
+      ctx.beginPath();
+      ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2);
+      const moonGrad = ctx.createRadialGradient(moonX - 10, moonY - 10, 0, moonX, moonY, moonRadius);
+      moonGrad.addColorStop(0, '#ffffff');
+      moonGrad.addColorStop(0.7, '#e8e8e8');
+      moonGrad.addColorStop(1, '#c0c0c0');
+      ctx.fillStyle = moonGrad;
+      ctx.fill();
+      
+      // 月亮环形山
+      ctx.fillStyle = 'rgba(180, 180, 180, 0.3)';
+      ctx.beginPath(); ctx.arc(moonX - 10, moonY - 5, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(moonX + 15, moonY + 10, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(moonX + 5, moonY - 15, 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+
+    /**
+     * drawDungeonBackground() — 绘制地下城城堡风格静态背景
+     *
+     * 绘制层次：
+     * 1. 石墙渐变背景：线性渐变，深蓝灰(#2c3e50)->中灰(#34495e)->深色
+     * 2. 砖石纹理：水平线 + 每 3 行一条交错垂直线
+     * 3. 中央拱门：半透明黑色阴影 + 灰色边框描边
+     * 4. 左右塔楼（x=100, x=W-160）：渐变主体 + 城垛 + 砖纹 + 窗户(带高光)
+     * 5. 三处火把位置(x=200, W-200, W/2)：支架 + 动态火焰 + 火光照射范围
+     *    火焰由 frameCount 驱动闪烁
+     *
+     * @param {CanvasRenderingContext2D} ctx — 目标绘图上下文
+     * 返回：无
+     */
+    function drawDungeonBackground(ctx) {
+      const wallGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+      wallGrad.addColorStop(0, '#2c3e50');
+      wallGrad.addColorStop(0.3, '#34495e');
+      wallGrad.addColorStop(0.7, '#2c3e50');
+      wallGrad.addColorStop(1, '#1a252f');
+      ctx.fillStyle = wallGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // 砖石纹理（简化版，减少绘制次数）
+      ctx.strokeStyle = '#3a3a3a';
+      ctx.lineWidth = 1;
+      const brickH = 24;
+      for (let row = 0; row < Math.ceil(GROUND_Y / brickH); row++) {
+        const by = row * brickH;
+        const offset = (row % 2) * 20;
+        ctx.beginPath();
+        ctx.moveTo(0, by);
+        ctx.lineTo(W, by);
+        ctx.stroke();
+        if (row % 3 === 0) {
+          ctx.beginPath();
+          ctx.moveTo(offset, by);
+          ctx.lineTo(offset, by + brickH);
+          ctx.stroke();
+        }
+      }
+      
+      // 城堡拱门装饰
+      const archX = W / 2;
+      const archY = GROUND_Y - 80;
+      const archWidth = 120;
+      const archHeight = 80;
+      
+      // 拱门阴影
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.beginPath();
+      ctx.moveTo(archX - archWidth / 2, archY);
+      ctx.lineTo(archX - archWidth / 2, archY + archHeight);
+      ctx.lineTo(archX + archWidth / 2, archY + archHeight);
+      ctx.lineTo(archX + archWidth / 2, archY);
+      ctx.quadraticCurveTo(archX, archY - 40, archX - archWidth / 2, archY);
+      ctx.fill();
+      
+      // 拱门边框
+      ctx.strokeStyle = '#5a5a5a';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(archX - archWidth / 2, archY);
+      ctx.lineTo(archX - archWidth / 2, archY + archHeight);
+      ctx.lineTo(archX + archWidth / 2, archY + archHeight);
+      ctx.lineTo(archX + archWidth / 2, archY);
+      ctx.quadraticCurveTo(archX, archY - 40, archX - archWidth / 2, archY);
+      ctx.stroke();
+      
+      // 城堡塔楼装饰（左右两侧）
+      const towerPositions = [
+        { x: 100, width: 60, height: 200 },
+        { x: W - 160, width: 60, height: 200 }
+      ];
+      
+      for (const tower of towerPositions) {
+        // 塔楼主体
+        const towerGrad = ctx.createLinearGradient(tower.x, 0, tower.x + tower.width, 0);
+        towerGrad.addColorStop(0, '#3d3d3d');
+        towerGrad.addColorStop(0.5, '#4a4a4a');
+        towerGrad.addColorStop(1, '#3d3d3d');
+        ctx.fillStyle = towerGrad;
+        ctx.fillRect(tower.x, 0, tower.width, tower.height);
+        
+        // 塔楼砖纹
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < tower.height; i += 15) {
+          ctx.beginPath();
+          ctx.moveTo(tower.x, i);
+          ctx.lineTo(tower.x + tower.width, i);
+          ctx.stroke();
+        }
+        
+        // 塔楼顶部（城垛）
+        const battlementHeight = 20;
+        const battlementWidth = 10;
+        ctx.fillStyle = '#4a4a4a';
+        for (let i = 0; i < tower.width; i += battlementWidth * 2) {
+          ctx.fillRect(tower.x + i, -battlementHeight, battlementWidth, battlementHeight);
+        }
+        
+        // 塔楼窗户
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(tower.x + tower.width / 2 - 8, 50, 16, 24);
+        ctx.fillRect(tower.x + tower.width / 2 - 8, 100, 16, 24);
+        
+        // 窗户高光
+        ctx.fillStyle = 'rgba(255, 255, 200, 0.1)';
+        ctx.fillRect(tower.x + tower.width / 2 - 6, 52, 4, 8);
+        ctx.fillRect(tower.x + tower.width / 2 - 6, 102, 4, 8);
+      }
+      
+      // 蜡烛/火把效果
+      const torchPositions = [
+        { x: 200, y: 100 },
+        { x: W - 200, y: 100 },
+        { x: W / 2, y: 150 }
+      ];
+      
+      for (const torch of torchPositions) {
+        // 火把支架
+        ctx.fillStyle = '#5a4a3a';
+        ctx.fillRect(torch.x - 3, torch.y, 6, 30);
+        
+        // 火焰（动态效果）
+        const flicker = Math.sin(frameCount * 0.1 + torch.x) * 3;
+        const flameGrad = ctx.createRadialGradient(torch.x, torch.y - 10, 2, torch.x, torch.y - 10, 15 + flicker);
+        flameGrad.addColorStop(0, '#fff7e6');
+        flameGrad.addColorStop(0.3, '#ffcc00');
+        flameGrad.addColorStop(0.7, '#ff9900');
+        flameGrad.addColorStop(1, 'rgba(255, 100, 0, 0)');
+        ctx.fillStyle = flameGrad;
+        ctx.beginPath();
+        ctx.ellipse(torch.x, torch.y - 10, 8 + flicker, 12 + flicker, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 火光照射
+        const lightGrad = ctx.createRadialGradient(torch.x, torch.y - 10, 10, torch.x, torch.y - 10, 80);
+        lightGrad.addColorStop(0, 'rgba(255, 200, 100, 0.15)');
+        lightGrad.addColorStop(1, 'rgba(255, 200, 100, 0)');
+        ctx.fillStyle = lightGrad;
+        ctx.beginPath();
+        ctx.arc(torch.x, torch.y - 10, 80, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+
+    /**
+     * drawDefaultBackground() — 绘制默认（通用）静态背景
+     *
+     * 蓝色系天空渐变 + 太阳光晕，作为未匹配到场景模式时的降级方案。
+     *
+     * @param {CanvasRenderingContext2D} ctx — 目标绘图上下文
+     * 返回：无
+     */
+    function drawDefaultBackground(ctx) {
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+      skyGrad.addColorStop(0, '#1e3c72');
+      skyGrad.addColorStop(0.3, '#2a5298');
+      skyGrad.addColorStop(0.6, '#7ec8e3');
+      skyGrad.addColorStop(1, '#b8e6f0');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      const sunX = W - 100;
+      const sunY = 80;
+      const sunRadius = 60;
+      
+      for (let i = 3; i >= 0; i--) {
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, sunRadius + i * 20, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 223, 100, ${0.1 - i * 0.02})`;
+        ctx.fill();
+      }
+      
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, sunRadius, 0, Math.PI * 2);
+      const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunRadius);
+      sunGrad.addColorStop(0, '#fff9e6');
+      sunGrad.addColorStop(0.5, '#ffe066');
+      sunGrad.addColorStop(1, '#ffcc00');
+      ctx.fillStyle = sunGrad;
+      ctx.fill();
+    }
+
+
+    /**
+     * drawBackground() — 绘制完整游戏背景（离屏缓存 + 动态元素 + 地面）
+     *
+     * 使用离屏 canvas 缓存策略：
+     * - 仅当 cacheDirty 为 true，或距离上次缓存更新超过 600 帧时重建缓存
+     * - 600 帧（10 秒）刷新一次可让半动态元素（如火把闪烁、云朵位置）仍有变化
+     * - 缓存通过 drawImage 一次性拷贝，避免每帧大量绘制调用
+     *
+     * 绘制层次（由远到近）：
+     * 1. 缓存静态背景（天空/太阳/月亮/砖墙等）
+     * 2. 场景动态元素（drawSceneElements：云/星星/火把/远山/森林剪影）
+     * 3. 地面（drawGround：根据场景模式）
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawBackground() {
+      // 仅在必要时更新缓存（延长缓存寿命，减少重绘）
+      if (cacheDirty || !backgroundCache || frameCount - lastCacheFrame > 600) {
+        createBackgroundCache();
+        lastCacheFrame = frameCount;
+      }
+      
+      // 使用缓存的背景
+      ctx.drawImage(backgroundCache, 0, 0);
+
+      // ---- 场景特定的背景元素 ----
+      drawSceneElements();
+
+      // ---- 精美的地面 ----
+      drawGround();
+    }
+
+
+    /**
+     * drawSceneElements() — 绘制各场景特定的动态/半动态背景元素
+     *
+     * 根据 currentSceneMode 分别绘制：
+     * - DESERT：两层远山（视差因子 0.3/0.5）+ 卷云 + 短草
+     * - NIGHT：森林剪影 + 闪烁星星（alpha = 0.3 + sin(twinkle) * 0.7）
+     * - DUNGEON：火把（摇曳效果，由 drawTorch 中的 flicker 驱动）
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawSceneElements() {
+      switch(currentSceneMode) {
+        case SCENES.DESERT:
+          // 远山（沙漠风格）
+          drawMountains(0.3, '#c2b280', 180);
+          drawMountains(0.5, '#8b7355', 150);
+          // 沙漠云朵
+          for (const c of clouds) {
+            if (c.type === 'desert') {
+              drawDesertCloud(c.x, c.y, c.w, c.h);
+            }
+          }
+          // 干枯短草
+          drawDesertGrass();
+          break;
+        case SCENES.NIGHT:
+          // 黑暗森林剪影
+          drawForestSilhouette();
+          // 星星（闪烁效果已在updateClouds中更新）
+          for (const c of clouds) {
+            if (c.type === 'star') {
+              const alpha = 0.3 + Math.sin(c.twinkle) * 0.7;
+              ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+              ctx.beginPath();
+              ctx.arc(c.x, c.y, c.w, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+          break;
+        case SCENES.DUNGEON:
+          // 火把（摇曳效果已在updateClouds中更新）
+          for (const c of clouds) {
+            if (c.type === 'torch') {
+              drawTorch(c.x, c.y, c.flicker);
+            }
+          }
+          break;
+        default:
+          drawMountains(0.3, '#4a6fa5', 180);
+          drawMountains(0.5, '#5b8db8', 150);
+          drawMountains(0.7, '#6ba3c7', 120);
+          for (const c of clouds) {
+            drawCloud(c.x, c.y, c.w, c.h);
+          }
+      }
+    }
+
+
+    /**
+     * drawDesertCloud() — 绘制沙漠卷云（两个椭圆叠加）
+     *
+     * @param {number} x — 云朵参考 X
+     * @param {number} y — 云朵参考 Y
+     * @param {number} w — 云朵宽度
+     * @param {number} h — 云朵高度
+     * 返回：无
+     */
+    function drawDesertCloud(x, y, w, h) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.beginPath();
+      ctx.ellipse(x, y, w * 0.5, h * 0.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(x + w * 0.4, y, w * 0.4, h * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+
+    /**
+     * drawDesertGrass() — 绘制沙漠地面短草（动画滚动）
+     *
+     * 沿地面线每隔 20px 绘制一根短草，草的高度用正弦波调制产生微风吹拂效果。
+     * 草的位置随帧速度和 gameSpeed 向左偏移，模拟视差滚动。
+     * offset 取模 20px，实现无缝循环滚动。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawDesertGrass() {
+      ctx.strokeStyle = '#d4a574';
+      ctx.lineWidth = 1;
+      const offset = gameState === 'start' ? 0 : (frameCount * gameSpeed * 0.3) % 20;
+      for (let i = 0; i < W; i += 20) {
+        const grassX = i - offset;
+        if ((i * 7 + Math.floor(offset)) % 10 > 3) {
+          const grassHeight = 3 + Math.sin(i * 0.1 + frameCount * 0.03) * 2;
+          ctx.beginPath();
+          ctx.moveTo(grassX, GROUND_Y);
+          ctx.lineTo(grassX + 2, GROUND_Y - grassHeight);
+          ctx.stroke();
+        }
+      }
+    }
+
+
+    /**
+     * drawForestSilhouette() — 绘制黑夜森林剪影
+     *
+     * 每隔 80px 绘制一棵三角形树木（树高 = 150 + sin(x) * 40），
+     * 每棵树附带 3 根树枝（向左/向右交替延伸）。
+     * 树木整体向左缓慢偏移（速度 = gameSpeed * 0.1），
+     * 超出左边界后从右侧重新进入，实现无限滚动。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawForestSilhouette() {
+      ctx.fillStyle = '#1a2930';
+      const offset = gameState === 'start' ? 0 : (frameCount * gameSpeed * 0.1) % 100;
+      
+      for (let x = -offset; x < W + 100; x += 80) {
+        const treeHeight = 150 + Math.sin(x * 0.02) * 40;
+        ctx.beginPath();
+        ctx.moveTo(x, GROUND_Y);
+        ctx.lineTo(x + 20, GROUND_Y - treeHeight);
+        ctx.lineTo(x + 40, GROUND_Y);
+        ctx.closePath();
+        ctx.fill();
+        
+        // 树枝
+        for (let i = 0; i < 3; i++) {
+          const branchY = GROUND_Y - treeHeight * 0.3 - i * 30;
+          ctx.beginPath();
+          ctx.moveTo(x + 20, branchY);
+          ctx.lineTo(x + 20 + (i % 2 === 0 ? -30 : 30), branchY + 15);
+          ctx.strokeStyle = '#1a2930';
+          ctx.lineWidth = 8;
+          ctx.stroke();
+        }
+      }
+    }
+
+
+    /**
+     * drawTorch() — 绘制火把（含动态摇曳火焰效果）
+     *
+     * 绘制层次（从外到内，从后到前）：
+     * 1. 火焰光晕：径向渐变，半径 80 +/- flicker*2，深橙到透明
+     * 2. 外焰：橙色二次曲线形状，左右不对称，由 flicker 偏移驱动摇曳
+     * 3. 内焰：亮橙色，比外焰小一圈
+     * 4. 焰心：白色小圆高光
+     * 5. 木柄：深棕色矩形 6x40px
+     * 6. 金属环：浅棕色小矩形 8x3px
+     *
+     * @param {number} x — 火把 X 坐标
+     * @param {number} y — 火把 Y 坐标（木柄顶部）
+     * @param {number} flicker — 摇曳相位（弧度值，递增产生运动）
+     * 返回：无
+     */
+    function drawTorch(x, y, flicker) {
+      const flickerOffset = Math.sin(flicker) * 3;
+      
+      // 火焰光晕
+      const glowRadius = 80 + flickerOffset * 2;
+      const glowGrad = ctx.createRadialGradient(x, y - 20, 0, x, y - 20, glowRadius);
+      glowGrad.addColorStop(0, 'rgba(255, 150, 50, 0.3)');
+      glowGrad.addColorStop(0.5, 'rgba(255, 100, 30, 0.1)');
+      glowGrad.addColorStop(1, 'rgba(255, 50, 0, 0)');
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.arc(x, y - 20, glowRadius, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 火焰
+      ctx.fillStyle = '#ff6600';
+      ctx.beginPath();
+      ctx.moveTo(x - 5, y);
+      ctx.quadraticCurveTo(x + 5 + flickerOffset, y - 30 + flickerOffset, x + 2, y);
+      ctx.quadraticCurveTo(x - 3 + flickerOffset * 0.5, y - 20, x - 5, y);
+      ctx.fill();
+      
+      // 火焰核心
+      ctx.fillStyle = '#ffaa00';
+      ctx.beginPath();
+      ctx.moveTo(x - 3, y);
+      ctx.quadraticCurveTo(x + 2 + flickerOffset, y - 20 + flickerOffset, x, y);
+      ctx.quadraticCurveTo(x - 1, y - 12, x - 3, y);
+      ctx.fill();
+      
+      // 火焰中心
+      ctx.fillStyle = '#fff9e6';
+      ctx.beginPath();
+      ctx.arc(x + flickerOffset * 0.3, y - 10, 3, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 木柄
+      ctx.fillStyle = '#5d4037';
+      ctx.fillRect(x - 3, y, 6, 40);
+      
+      // 金属环
+      ctx.fillStyle = '#8b7355';
+      ctx.fillRect(x - 4, y, 8, 3);
+    }
+
+
+    /**
+     * drawMountains() — 绘制远山（视差滚动效果）
+     *
+     * 使用正弦和余弦波叠加生成自然起伏的山脊轮廓线。
+     * 水平偏移量 offset = frameCount * gameSpeed * parallaxFactor，
+     * parallaxFactor 越小（如 0.3），山体移动越慢，视觉感觉越远。
+     * 基准高度 baseHeight 上叠加 sin(x*0.01)*30 + cos(x*0.02)*20 的波动。
+     *
+     * @param {number} parallaxFactor — 视差因子（0~1，越小越远）
+     * @param {string} color — 山体填充颜色
+     * @param {number} baseHeight — 山体基准高度（像素）
+     * 返回：无
+     */
+    function drawMountains(parallaxFactor, color, baseHeight) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(0, H);
+      
+      const offset = gameState === 'start' ? 0 : (frameCount * gameSpeed * parallaxFactor) % 400;
+      
+      for (let x = -offset; x <= W + 400; x += 100) {
+        const mountainHeight = baseHeight + Math.sin(x * 0.01) * 30 + Math.cos(x * 0.02) * 20;
+        ctx.lineTo(x, GROUND_Y - mountainHeight);
+      }
+      
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+
+    /**
+     * drawCloud() — 绘制精美云朵（多层圆形叠加实现蓬松质感）
+     *
+     * 绘制层次：
+     * 1. 主云团：3 个椭圆按位置偏移叠加（w*0.3/h*0.6, w*0.5/h*0.7, w*0.7/h*0.6）
+     * 2. 高光：1 个偏左上亮白色椭圆（w*0.45/h*0.35, h*0.4）
+     * 3. 阴影：1 个偏右下蓝色半透明椭圆（w*0.5/h*0.65, h*0.5）
+     *
+     * @param {number} x — 云朵参考 X
+     * @param {number} y — 云朵参考 Y
+     * @param {number} w — 云朵宽度
+     * @param {number} h — 云朵高度
+     * 返回：无
+     */
+    function drawCloud(x, y, w, h) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      
+      // 主云团
+      ctx.beginPath();
+      ctx.arc(x + w * 0.3, y + h * 0.5, h * 0.6, 0, Math.PI * 2);
+      ctx.arc(x + w * 0.5, y + h * 0.4, h * 0.7, 0, Math.PI * 2);
+      ctx.arc(x + w * 0.7, y + h * 0.5, h * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 高光
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.beginPath();
+      ctx.arc(x + w * 0.45, y + h * 0.35, h * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 阴影
+      ctx.fillStyle = 'rgba(200, 220, 255, 0.3)';
+      ctx.beginPath();
+      ctx.arc(x + w * 0.5, y + h * 0.65, h * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+
+    /**
+     * drawGround() — 根据场景模式绘制地面（分发器）
+     *
+     * 根据 currentSceneMode 调用对应的地面绘制函数。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawGround() {
+      switch(currentSceneMode) {
+        case SCENES.DESERT:
+          drawDesertGround();
+          break;
+        case SCENES.NIGHT:
+          drawNightGround();
+          break;
+        case SCENES.DUNGEON:
+          drawDungeonGround();
+          break;
+        default:
+          drawDefaultGround();
+      }
+    }
+
+
+    /**
+     * drawDefaultGround() — 绘制默认草地地面
+     *
+     * 绘制层次（从上到下）：
+     * 1. 草地层（顶部 15px）：线性渐变（亮绿->深绿）
+     * 2. 草叶细节：正弦波调制的二次曲线，随风微微摆动（振幅 5+sin*3）
+     * 3. 土壤层：线性渐变（棕->深棕->深褐）
+     * 4. 土壤纹理：20 个随机分布的小矩形（模拟土块）
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawDefaultGround() {
+      // 草地层
+      const grassGrad = ctx.createLinearGradient(0, GROUND_Y, 0, GROUND_Y + 15);
+      grassGrad.addColorStop(0, '#7cb342');
+      grassGrad.addColorStop(1, '#558b2f');
+      ctx.fillStyle = grassGrad;
+      ctx.fillRect(0, GROUND_Y, W, 15);
+      
+      // 草叶细节
+      ctx.strokeStyle = '#8bc34a';
+      ctx.lineWidth = 2;
+      const grassOffset = gameState === 'start' ? 0 : (frameCount * gameSpeed * 0.5) % 15;
+      for (let i = 0; i < W; i += 15) {
+        const grassX = i - grassOffset;
+        const grassHeight = 5 + Math.sin(i * 0.1 + frameCount * 0.05) * 3;
+        ctx.beginPath();
+        ctx.moveTo(grassX, GROUND_Y);
+        ctx.quadraticCurveTo(grassX + 3, GROUND_Y - grassHeight, grassX + 6, GROUND_Y);
+        ctx.stroke();
+      }
+      
+      // 土壤层
+      const soilGrad = ctx.createLinearGradient(0, GROUND_Y + 15, 0, H);
+      soilGrad.addColorStop(0, '#8d6e63');
+      soilGrad.addColorStop(0.3, '#6d4c41');
+      soilGrad.addColorStop(1, '#5d4037');
+      ctx.fillStyle = soilGrad;
+      ctx.fillRect(0, GROUND_Y + 15, W, H - GROUND_Y - 15);
+      
+      // 土壤纹理
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+      for (let i = 0; i < 20; i++) {
+        const texX = (i * 47 + frameCount * 0.3) % W;
+        const texY = GROUND_Y + 20 + (i * 31) % 40;
+        ctx.fillRect(texX, texY, 8, 3);
+      }
+    }
+
+
+    /**
+     * drawDesertGround() — 绘制沙漠地面
+     *
+     * 绘制层次（从上到下）：
+     * 1. 沙土层：线性渐变（浅沙黄->沙黄->沙褐）
+     * 2. 沙砾纹理：30 个随机位置的小圆点，基于帧率缓慢水平滚动
+     *    固定大小变化确保不闪烁
+     * 3. 沙丘起伏：相隔 50px 的半透明椭圆，向左缓移模拟沙丘推进
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawDesertGround() {
+      // 沙土层
+      const sandGrad = ctx.createLinearGradient(0, GROUND_Y, 0, H);
+      sandGrad.addColorStop(0, '#f9e79f');
+      sandGrad.addColorStop(0.3, '#f0d080');
+      sandGrad.addColorStop(1, '#d6b569');
+      ctx.fillStyle = sandGrad;
+      ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+      
+      // 沙砾纹理（使用固定随机种子避免闪烁）
+      ctx.fillStyle = 'rgba(139, 119, 85, 0.2)';
+      for (let i = 0; i < 30; i++) {
+        const texX = (i * 37 + Math.floor(frameCount * 0.2)) % W;
+        const texY = GROUND_Y + 5 + (i * 23) % 55;
+        const size = 2 + (i % 5) + 1; // 固定的大小变化
+        ctx.beginPath();
+        ctx.arc(texX, texY, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // 沙丘起伏
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+      const offset = gameState === 'start' ? 0 : (frameCount * gameSpeed * 0.3) % 50;
+      for (let x = -offset; x < W + 50; x += 50) {
+        ctx.beginPath();
+        ctx.ellipse(x + 25, GROUND_Y + 8, 25, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+
+    /**
+     * drawNightGround() — 绘制黑夜地面
+     *
+     * 绘制层次（从上到下）：
+     * 1. 黑暗土层：线性渐变（深蓝灰->更暗）
+     * 2. 苔藓斑点：20 个半透明绿色椭圆（随机位置滚动）
+     * 3. 地面裂纹纹理：15 条斜线从地面向下延伸
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawNightGround() {
+      // 黑暗地面
+      const groundGrad = ctx.createLinearGradient(0, GROUND_Y, 0, H);
+      groundGrad.addColorStop(0, '#34495e');
+      groundGrad.addColorStop(0.5, '#2c3e50');
+      groundGrad.addColorStop(1, '#1a2930');
+      ctx.fillStyle = groundGrad;
+      ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+      
+      // 苔藓斑点（固定大小避免闪烁）
+      ctx.fillStyle = 'rgba(76, 175, 80, 0.2)';
+      for (let i = 0; i < 20; i++) {
+        const mossX = (i * 43 + Math.floor(frameCount * 0.1)) % W;
+        const mossY = GROUND_Y + 10 + (i * 29) % 45;
+        const mossW = 8 + (i % 7);
+        const mossH = 4 + (i % 4);
+        ctx.beginPath();
+        ctx.ellipse(mossX, mossY, mossW, mossH, (i * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // 地面纹理
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 15; i++) {
+        const texX = (i * 57 + frameCount * 0.15) % W;
+        ctx.beginPath();
+        ctx.moveTo(texX, GROUND_Y + 5);
+        ctx.lineTo(texX + 20, GROUND_Y + 45);
+        ctx.stroke();
+      }
+    }
+
+
+    /**
+     * drawDungeonGround() — 绘制地下城石板地面
+     *
+     * 绘制层次（从上到下）：
+     * 1. 石板基底：线性渐变（中灰->深灰->更深灰）
+     * 2. 砖纹：交错排列矩形石板（58x28px），行间偏移半块砖宽（60/2=30）
+     *    相邻石板颜色交替（#4a4a4a/#3a3a3a）
+     * 3. 高光：每块板顶部 2px 白色半透明线
+     * 4. 裂缝：每 3 块板有一条斜线裂纹
+     * 5. 大裂缝：5 条粗黑曲线延伸
+     * 6. 苔藓和污渍：8 个半透明绿色椭圆
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawDungeonGround() {
+      // 石板地面
+      const stoneGrad = ctx.createLinearGradient(0, GROUND_Y, 0, H);
+      stoneGrad.addColorStop(0, '#3a3a3a');
+      stoneGrad.addColorStop(0.5, '#2a2a2a');
+      stoneGrad.addColorStop(1, '#1a1a1a');
+      ctx.fillStyle = stoneGrad;
+      ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+      
+      // 石板砖纹
+      const stoneWidth = 60;
+      const stoneHeight = 30;
+      const stoneColor = '#4a4a4a';
+      const stoneDarkColor = '#3a3a3a';
+      
+      for (let row = 0; row < Math.ceil((H - GROUND_Y) / stoneHeight); row++) {
+        const offset = (row % 2) * (stoneWidth / 2);
+        for (let col = -1; col < Math.ceil(W / stoneWidth) + 1; col++) {
+          const sx = col * stoneWidth + offset;
+          const sy = GROUND_Y + row * stoneHeight;
+          
+          // 石板主体
+          ctx.fillStyle = (row + col) % 2 === 0 ? stoneColor : stoneDarkColor;
+          ctx.fillRect(sx, sy, stoneWidth - 2, stoneHeight - 2);
+          
+          // 石板高光
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+          ctx.fillRect(sx, sy, stoneWidth - 2, 2);
+          
+          // 石板裂缝
+          if ((row + col) % 3 === 0) {
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(sx + 10, sy);
+            ctx.lineTo(sx + 20, sy + stoneHeight - 2);
+            ctx.stroke();
+          }
+        }
+      }
+      
+      // 地面裂缝
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 5; i++) {
+        const startX = (i * 150 + frameCount * 0.1) % W;
+        ctx.beginPath();
+        ctx.moveTo(startX, GROUND_Y + 5);
+        ctx.lineTo(startX + 40 + (i * 11) % 30, GROUND_Y + 55 + (i * 5) % 15);
+        ctx.stroke();
+      }
+      
+      // 苔藓和污渍
+      ctx.fillStyle = 'rgba(50, 80, 50, 0.2)';
+      for (let i = 0; i < 8; i++) {
+        const mossX = (i * 80 + frameCount * 0.05) % W;
+        const mossY = GROUND_Y + 10 + (i * 13) % 40;
+        ctx.beginPath();
+        ctx.ellipse(mossX, mossY, 8 + (i % 4), 4 + (i % 3), 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+
+    /**
+     * drawPlatform() — 绘制精美的木质起飞平台
+     *
+     * 若平台已完全移出屏幕左侧（platformX + PLATFORM_W <= 0），直接跳过。
+     *
+     * 绘制层次（从下到上）：
+     * 1. 下方阴影（右下偏移 5px，半透明黑）
+     * 2. 木板主体：线性渐变（浅木色->中木色->深木色）
+     * 3. 木纹纹理：每隔 4px 一条水平线
+     * 4. 边缘高光（顶部 + 左侧白色半透明细线）
+     * 5. 边缘阴影（底部 + 右侧深色半透明细线）
+     * 6. 金属铆钉装饰：左右各一颗带高光的圆形
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawPlatform() {
+      if (platformX + PLATFORM_W <= 0) return;
+      const py = GROUND_Y - PLATFORM_H;
+
+      // 平台阴影
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.fillRect(platformX + 5, py + 5, PLATFORM_W, PLATFORM_H);
+
+      // 木板主体（渐变）
+      const woodGrad = ctx.createLinearGradient(platformX, py, platformX, py + PLATFORM_H);
+      woodGrad.addColorStop(0, '#d4a574');
+      woodGrad.addColorStop(0.5, '#c89b6b');
+      woodGrad.addColorStop(1, '#b8895a');
+      ctx.fillStyle = woodGrad;
+      ctx.fillRect(platformX, py, PLATFORM_W, PLATFORM_H);
+
+      // 木纹纹理
+      ctx.strokeStyle = 'rgba(139, 107, 62, 0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < PLATFORM_H; i += 4) {
+        ctx.beginPath();
+        ctx.moveTo(platformX, py + i);
+        ctx.lineTo(platformX + PLATFORM_W, py + i);
+        ctx.stroke();
+      }
+
+      // 木板边缘高光
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.fillRect(platformX, py, PLATFORM_W, 2);
+      ctx.fillRect(platformX, py, 2, PLATFORM_H);
+
+      // 木板边缘阴影
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.fillRect(platformX, py + PLATFORM_H - 2, PLATFORM_W, 2);
+      ctx.fillRect(platformX + PLATFORM_W - 2, py, 2, PLATFORM_H);
+
+      // 金属铆钉装饰
+      ctx.fillStyle = '#8b7355';
+      const rivetPositions = [20, PLATFORM_W - 20];
+      for (const rx of rivetPositions) {
+        ctx.beginPath();
+        ctx.arc(platformX + rx, py + PLATFORM_H / 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 铆钉高光
+        ctx.fillStyle = '#a08060';
+        ctx.beginPath();
+        ctx.arc(platformX + rx - 1, py + PLATFORM_H / 2 - 1, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#8b7355';
+      }
+    }
+
+
+    /**
+     * drawBird() — 绘制超可爱肥啾（北长尾山雀二次元萌化风格，支持皮肤系统）
+     *
+     * 绘制顺序（由后到前，由下到上）：
+     * 1. 柔和下拉阴影（blur=6, offset=(1,2)）
+     * 2. 主体身体：径向渐变椭圆，根据 skinConfig.bodyColor
+     * 3. 头部：偏前上方的椭圆，比身体略亮
+     * 4. 头顶羽毛 + 头顶高光
+     * 5. 白色腹部：径向渐变（白->乳白->浅黄），蓬松感椭圆
+     * 6. 翅膀：根据 wingFrame 在上位或下位，含渐变色和高光
+     * 7. 大眼睛：眼白->虹膜渐层->瞳孔->主高光->副高光->反光->眼皮
+     * 8. 可爱嘴巴：上嘴壳(带高光)+下嘴壳，贝塞尔曲线勾勒
+     * 9. 俏皮呆毛：主呆毛(带高光)+第二根呆毛
+     * 10. 可爱腮红：左右各一径向渐变粉色椭圆
+     * 11. 小脚丫：仅在 vy < 2（下落缓慢）时显示
+     * 12. 场景装饰：围巾/夜光羽毛/矿工头盔
+     *
+     * 使用 ctx.save/restore + translate/rotate 实现整体旋转，
+     * 死亡时 rotation 递增，鸟会逐渐翻转掉落。
+     * 颜色全部从 SKIN_CONFIG[currentSkin] 获取，支持 5 种皮肤。
+     *
+     * 参数：无（读取 bird 对象、currentSkin）
+     * 返回：无
+     */
+    function drawBird() {
+      const bx = bird.x, by = Math.round(bird.y);
+      const skinConfig = SKIN_CONFIG[currentSkin];
+
+      ctx.save();
+      ctx.translate(bx + 14, by + 12);
+      if (bird.rotation !== 0) {
+        ctx.rotate(bird.rotation);
+      }
+
+      // === 柔和阴影 ===
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetX = 1;
+      ctx.shadowOffsetY = 2;
+
+      // === 主体身体（北长尾山雀风格：修长圆润、背部棕色、腹部白色）===
+      // 背部（棕色渐变，更修长的椭圆）
+      const backGrad = ctx.createRadialGradient(-2, -3, 2, 0, 0, 16);
+      backGrad.addColorStop(0, lightenColor(skinConfig.bodyColor, 20));
+      backGrad.addColorStop(0.4, skinConfig.bodyColor);
+      backGrad.addColorStop(1, darkenColor(skinConfig.bodyColor, 15));
+      ctx.fillStyle = backGrad;
+      ctx.beginPath();
+      ctx.ellipse(-1, 0, 14, 11, -0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 头部（棕色，略偏前上方，更显灵动）
+      ctx.fillStyle = lightenColor(skinConfig.bodyColor, 10);
+      ctx.beginPath();
+      ctx.ellipse(1, -7, 12, 10, 0.05, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 头顶羽毛（深棕色，更小更精致）
+      ctx.fillStyle = darkenColor(skinConfig.featherColor, 10);
+      ctx.beginPath();
+      ctx.ellipse(1, -14, 8, 4.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 头顶高光
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.beginPath();
+      ctx.ellipse(-1, -16, 4, 2.5, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 清除阴影后续绘制
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+
+      // === 白色腹部（修长蓬松感）===
+      const bellyGrad = ctx.createRadialGradient(5, 3, 1, 5, 3, 11);
+      bellyGrad.addColorStop(0, '#ffffff');
+      bellyGrad.addColorStop(0.5, '#fff8e1');
+      bellyGrad.addColorStop(1, '#ffecb3');
+      ctx.fillStyle = bellyGrad;
+      ctx.beginPath();
+      ctx.ellipse(4, 2, 11, 9, 0.15, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 腹部高光
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(3, 0, 5, 3, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // === 翅膀（北长尾山雀风格：修长棕色羽毛）===
+      if (bird.wingFrame === 0) {
+        // 翅膀在上
+        const wingGrad = ctx.createLinearGradient(-4, -10, 8, -2);
+        wingGrad.addColorStop(0, lightenColor(skinConfig.wingColor, 15));
+        wingGrad.addColorStop(0.5, skinConfig.wingColor);
+        wingGrad.addColorStop(1, darkenColor(skinConfig.wingColor, 15));
+        ctx.fillStyle = wingGrad;
+        
+        ctx.beginPath();
+        ctx.ellipse(-1, -7, 9, 5.5, 0.15, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 翅膀高光
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.beginPath();
+        ctx.ellipse(-2, -8, 5, 2.5, 0.15, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // 翅膀在下
+        const wingGrad = ctx.createLinearGradient(-4, 3, 8, 10);
+        wingGrad.addColorStop(0, lightenColor(skinConfig.wingColor, 15));
+        wingGrad.addColorStop(0.5, skinConfig.wingColor);
+        wingGrad.addColorStop(1, darkenColor(skinConfig.wingColor, 15));
+        ctx.fillStyle = wingGrad;
+        
+        ctx.beginPath();
+        ctx.ellipse(-1, 7, 9, 5.5, -0.15, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.beginPath();
+        ctx.ellipse(-2, 8, 5, 2.5, -0.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // === 大眼睛（更萌化风格）===
+      // 眼白
+      const eyeWhiteGrad = ctx.createRadialGradient(7, -8, 1, 7, -8, 8);
+      eyeWhiteGrad.addColorStop(0, '#ffffff');
+      eyeWhiteGrad.addColorStop(1, '#f5f5f5');
+      ctx.fillStyle = eyeWhiteGrad;
+      ctx.beginPath();
+      ctx.ellipse(7, -8, 8, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 眼睛边框
+      ctx.strokeStyle = '#4e342e';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      
+      // 虹膜（深棕色）
+      const irisGrad = ctx.createRadialGradient(8, -7, 1, 8, -7, 6);
+      irisGrad.addColorStop(0, '#8d6e63');
+      irisGrad.addColorStop(0.4, '#5d4037');
+      irisGrad.addColorStop(1, '#3e2723');
+      ctx.fillStyle = irisGrad;
+      ctx.beginPath();
+      ctx.arc(8, -7, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 瞳孔
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(8.5, -6.5, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 主高光
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(10, -9, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      // 副高光
+      ctx.beginPath();
+      ctx.arc(6, -5, 1.3, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 微小反光
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.beginPath();
+      ctx.arc(11, -5, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 眼皮
+      ctx.fillStyle = 'rgba(255, 230, 180, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(9, -12, 5, 2, 0, Math.PI, 0);
+      ctx.fill();
+
+      // === 可爱嘴巴（精致小巧）===
+      // 上嘴壳
+      const upperBeakGrad = ctx.createLinearGradient(13, -4, 17, 0);
+      upperBeakGrad.addColorStop(0, lightenColor(skinConfig.beakColor, 20));
+      upperBeakGrad.addColorStop(0.5, skinConfig.beakColor);
+      upperBeakGrad.addColorStop(1, darkenColor(skinConfig.beakColor, 10));
+      ctx.fillStyle = upperBeakGrad;
+      ctx.beginPath();
+      ctx.moveTo(13, -4);
+      ctx.bezierCurveTo(14.5, -5.5, 16, -4.5, 17, -2);
+      ctx.bezierCurveTo(16, -0.5, 14.5, 0, 13, -1);
+      ctx.closePath();
+      ctx.fill();
+      
+      // 上嘴高光
+      ctx.fillStyle = 'rgba(255, 220, 150, 0.4)';
+      ctx.beginPath();
+      ctx.moveTo(14, -3.5);
+      ctx.quadraticCurveTo(15.5, -4, 16, -2.5);
+      ctx.quadraticCurveTo(15, -3, 14, -3.5);
+      ctx.fill();
+      
+      // 下嘴壳
+      const lowerBeakGrad = ctx.createLinearGradient(13, -1, 16.5, 1.5);
+      lowerBeakGrad.addColorStop(0, skinConfig.beakColor);
+      lowerBeakGrad.addColorStop(1, darkenColor(skinConfig.beakColor, 10));
+      ctx.fillStyle = lowerBeakGrad;
+      ctx.beginPath();
+      ctx.moveTo(13, -1);
+      ctx.bezierCurveTo(14.5, 0.3, 16, 0.8, 16.5, 1.2);
+      ctx.bezierCurveTo(15.5, 1.5, 14, 1.2, 13, 1);
+      ctx.closePath();
+      ctx.fill();
+
+      // === 俏皮呆毛（精致灵动）===
+      // 主呆毛
+      const crestGrad = ctx.createLinearGradient(-6, -16, 0, -11);
+      crestGrad.addColorStop(0, lightenColor(skinConfig.featherColor, 20));
+      crestGrad.addColorStop(0.5, skinConfig.featherColor);
+      crestGrad.addColorStop(1, darkenColor(skinConfig.featherColor, 10));
+      ctx.fillStyle = crestGrad;
+      ctx.beginPath();
+      ctx.moveTo(-8, -12);
+      ctx.bezierCurveTo(-6, -19, -2, -20, 1, -12);
+      ctx.bezierCurveTo(-1, -11, -5, -11, -8, -12);
+      ctx.closePath();
+      ctx.fill();
+      
+      // 呆毛高光
+      ctx.fillStyle = 'rgba(255, 250, 200, 0.7)';
+      ctx.beginPath();
+      ctx.moveTo(-6, -15);
+      ctx.quadraticCurveTo(-4, -17, -2, -15);
+      ctx.quadraticCurveTo(-4, -14, -6, -15);
+      ctx.fill();
+      
+      // 第二根呆毛
+      ctx.fillStyle = 'rgba(255, 193, 7, 0.8)';
+      ctx.beginPath();
+      ctx.moveTo(-3, -12);
+      ctx.bezierCurveTo(-2, -16, 0.5, -16, 2, -12);
+      ctx.bezierCurveTo(1, -11.5, -1.5, -11.5, -3, -12);
+      ctx.fill();
+
+      // === 可爱腮红（淡雅自然）===
+      // 左腮红
+      const blushLeftGrad = ctx.createRadialGradient(3, 3, 1, 3, 3, 6);
+      blushLeftGrad.addColorStop(0, 'rgba(255, 170, 170, 0.55)');
+      blushLeftGrad.addColorStop(0.5, 'rgba(255, 150, 150, 0.3)');
+      blushLeftGrad.addColorStop(1, 'rgba(255, 150, 150, 0)');
+      ctx.fillStyle = blushLeftGrad;
+      ctx.beginPath();
+      ctx.ellipse(3, 3, 5.5, 4.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 右腮红
+      const blushRightGrad = ctx.createRadialGradient(7, 2, 1, 7, 2, 5);
+      blushRightGrad.addColorStop(0, 'rgba(255, 170, 170, 0.5)');
+      blushRightGrad.addColorStop(0.5, 'rgba(255, 150, 150, 0.25)');
+      blushRightGrad.addColorStop(1, 'rgba(255, 150, 150, 0)');
+      ctx.fillStyle = blushRightGrad;
+      ctx.beginPath();
+      ctx.ellipse(7, 2, 5, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // === 小脚丫（小巧精致）===
+      if (bird.vy < 2) {
+        // 左脚
+        const footGrad = ctx.createRadialGradient(-3, 11, 1, -3, 11, 3);
+        footGrad.addColorStop(0, '#ffe0b2');
+        footGrad.addColorStop(1, '#ffcc80');
+        ctx.fillStyle = footGrad;
+        ctx.beginPath();
+        ctx.ellipse(-3, 11, 3, 2.5, 0.35, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 右脚
+        ctx.fillStyle = footGrad;
+        ctx.beginPath();
+        ctx.ellipse(3, 11, 3, 2.5, -0.35, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 脚趾
+        ctx.fillStyle = '#ffab40';
+        for (let foot of [-3, 3]) {
+          const baseAngle = foot === -3 ? 0.4 : -0.4;
+          for (let toe = -1; toe <= 1; toe++) {
+            const toeAngle = baseAngle + toe * 0.35;
+            const toeX = foot + Math.cos(toeAngle + Math.PI / 2) * 3;
+            const toeY = 11 + Math.sin(toeAngle + Math.PI / 2) * 3;
+            ctx.beginPath();
+            ctx.arc(toeX, toeY, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+
+      // === 场景特定装饰 ===
+      drawBirdSceneDecoration();
+
+      ctx.restore();
+    }
+
+
+    /**
+     * lightenColor() — 将十六进制颜色变亮指定百分比
+     *
+     * 解析 #RRGGBB 为 RGB 分量，每个分量加上 2.55 * percent，
+     * 结果钳位到 [0, 255] 区间。
+     *
+     * @param {string} color — 十六进制颜色（如 #fcdb5a）
+     * @param {number} percent — 变亮百分比（0~100）
+     * @returns {string} 变亮后的十六进制颜色
+     */
+    function lightenColor(color, percent) {
+      const num = parseInt(color.replace('#', ''), 16);
+      const amt = Math.round(2.55 * percent);
+      const R = (num >> 16) + amt;
+      const G = (num >> 8 & 0x00FF) + amt;
+      const B = (num & 0x0000FF) + amt;
+      return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
+        (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
+        (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
+    }
+
+
+    /**
+     * darkenColor() — 将十六进制颜色变暗指定百分比
+     *
+     * 与 lightenColor 相反，每个分量减去 2.55 * percent，
+     * 结果钳位到 [0, 255]。
+     *
+     * @param {string} color — 十六进制颜色
+     * @param {number} percent — 变暗百分比（0~100）
+     * @returns {string} 变暗后的十六进制颜色
+     */
+    function darkenColor(color, percent) {
+      const num = parseInt(color.replace('#', ''), 16);
+      const amt = Math.round(2.55 * percent);
+      const R = (num >> 16) - amt;
+      const G = (num >> 8 & 0x00FF) - amt;
+      const B = (num & 0x0000FF) - amt;
+      return '#' + (0x1000000 + (R > 0 ? R : 0) * 0x10000 +
+        (G > 0 ? G : 0) * 0x100 +
+        (B > 0 ? B : 0)).toString(16).slice(1);
+    }
+
+
+    /**
+     * drawBirdSceneDecoration() — 根据场景在肥啾身上添加装饰
+     *
+     * 三种场景装饰：
+     * - DESERT：浅棕色围巾（贝塞尔曲线环绕颈部）
+     * - NIGHT：夜光羽毛（4 根发光青色椭圆，shadowBlur=10 产生荧光效果）
+     * - DUNGEON：迷你矿工头盔（灰色椭圆帽檐 + 橙色发光矿灯，shadowBlur=12）
+     *
+     * 参数：无（读取 currentSceneMode）
+     * 返回：无
+     */
+    function drawBirdSceneDecoration() {
+      switch(currentSceneMode) {
+        case SCENES.DESERT:
+          // 沙漠模式：浅棕色围巾
+          ctx.shadowColor = 'transparent';
+          const scarfGrad = ctx.createLinearGradient(-8, 0, 8, 0);
+          scarfGrad.addColorStop(0, '#bcaaa4');
+          scarfGrad.addColorStop(0.5, '#a1887f');
+          scarfGrad.addColorStop(1, '#8d6e63');
+          ctx.fillStyle = scarfGrad;
+          ctx.beginPath();
+          ctx.moveTo(-10, 0);
+          ctx.bezierCurveTo(-8, 4, -6, 6, -3, 5);
+          ctx.lineTo(3, 5);
+          ctx.bezierCurveTo(6, 6, 8, 4, 10, 0);
+          ctx.bezierCurveTo(8, -2, 4, -3, 0, -2);
+          ctx.bezierCurveTo(-4, -3, -8, -2, -10, 0);
+          ctx.closePath();
+          ctx.fill();
+          break;
+          
+        case SCENES.NIGHT:
+          // 黑夜模式：夜光羽毛装饰
+          ctx.shadowColor = 'rgba(100, 255, 200, 0.6)';
+          ctx.shadowBlur = 10;
+          ctx.fillStyle = 'rgba(100, 255, 200, 0.4)';
+          for (let i = 0; i < 4; i++) {
+            ctx.beginPath();
+            const fx = -8 + i * 4;
+            const fy = -2 + Math.sin(i * 0.8) * 2;
+            ctx.ellipse(fx, fy, 2, 3.5, Math.sin(i) * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.shadowBlur = 0;
+          break;
+          
+        case SCENES.DUNGEON:
+          // 地下城模式：迷你矿工头盔
+          const helmetGrad = ctx.createLinearGradient(-12, -16, 12, -16);
+          helmetGrad.addColorStop(0, '#78909c');
+          helmetGrad.addColorStop(0.5, '#90a4ae');
+          helmetGrad.addColorStop(1, '#78909c');
+          ctx.fillStyle = helmetGrad;
+          ctx.beginPath();
+          ctx.ellipse(0, -14, 11, 6, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#546e7a';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          // 矿灯
+          ctx.fillStyle = '#ff8f00';
+          ctx.shadowColor = 'rgba(255, 156, 0, 0.8)';
+          ctx.shadowBlur = 12;
+          ctx.beginPath();
+          ctx.arc(0, -20, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          break;
+      }
+    }
+
+
+    /**
+     * drawObstacles() — 绘制所有障碍物（支持非对称上下布局）
+     *
+     * 遍历 obstacles 数组，对每个障碍物根据 obsType 属性决定绘制哪些部分：
+     * - both：上方柱子（从顶部到 topH）+ 下方柱子（从 bottomTop 到地面）
+     * - top：仅绘制上方柱子
+     * - bottom：仅绘制下方柱子
+     *
+     * 每个障碍物使用 fixedSeed（o.seed）保证其纹理细节不随位置移动而闪烁。
+     * 场景类型由 sceneType 指定，传入 drawScenePillar 进行场景分发。
+     *
+     * 参数：无（读取 obstacles 数组）
+     * 返回：无
+     */
+    function drawObstacles() {
+      for (let i = 0; i < obstacles.length; i++) {
+        const o = obstacles[i];
+        const obsType = o.obsType || 'both';
+        
+        // 根据场景获取障碍物类型
+        const sceneObstacleType = o.sceneType || getSceneObstacleType(o.x);
+        // 使用固定的种子，确保障碍物细节不随位置移动而变化
+        const fixedSeed = o.seed || (o.x * 1000 + i);
+        
+        // 根据obsType决定绘制哪些障碍物
+        if (obsType === 'both' || obsType === 'top') {
+          drawScenePillar(o.x, 0, OBS_W, o.topH, true, sceneObstacleType, fixedSeed);
+        }
+        if (obsType === 'both' || obsType === 'bottom') {
+          // 下障碍物只显示到地面为止
+          const bottomH = GROUND_Y - o.bottomTop;
+          if (bottomH > 0) {
+            drawScenePillar(o.x, o.bottomTop, OBS_W, bottomH, false, sceneObstacleType, fixedSeed);
+          }
+        }
+      }
+    }
+
+
+    /**
+     * getSceneObstacleType() — 基于种子值随机获取场景障碍物类型索引
+     *
+     * 使用 seededRandom 生成伪随机数，映射到 0~(OBS_TYPES_PER_SCENE-1) 整数范围。
+     * 相同的 seedX 始终返回相同类型，保证同一位置的障碍物视觉一致性。
+     *
+     * @param {number} seedX — 位置相关的种子值
+     * @returns {number} 0~4 整数，代表场景特定的 5 种障碍物类型
+     */
+    function getSceneObstacleType(seedX) {
+      const seed = seedX || (frameCount + obstacles.length * 100);
+      const r = seededRandom(seed * 7.3 + seed * 0.1);
+      switch(currentSceneMode) {
+        case SCENES.DESERT:
+        case SCENES.NIGHT:
+        case SCENES.DUNGEON:
+          return Math.floor(r * OBS_TYPES_PER_SCENE);
+        default:
+          return Math.floor(r * 5);
+      }
+    }
+
+
+    /**
+     * drawScenePillar() — 根据场景模式绘制单个障碍物柱子
+     *
+     * 通用绘制流程：
+     * 1. ctx.save + clip(roundRect) 约束所有装饰在柱体边界内
+     * 2. 线性渐变填充柱体主体（场景自适应颜色）
+     * 3. 边缘高光描边（白色半透明圆角矩形）
+     * 4. 根据 currentSceneMode 分发到具体场景绘制函数
+     *
+     * @param {number} x — 柱体 X
+     * @param {number} y — 柱体 Y
+     * @param {number} w — 柱体宽度（固定 OBS_W=48）
+     * @param {number} h — 柱体高度
+     * @param {boolean} isTop — 是否上方柱子（影响装饰方向）
+     * @param {number} typeId — 障碍物类型索引 0~4
+     * @param {number} fixedSeed — 随机种子（保证绘制细节稳定）
+     * 返回：无
+     */
+    function drawScenePillar(x, y, w, h, isTop, typeId, fixedSeed) {
+      if (h <= 0) return;
+
+      // 基础主体填充：确保障碍物始终可见
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 4);
+      ctx.clip();
+
+      // 基础渐变填充（场景自适应）
+      let baseColor1, baseColor2;
+      switch(currentSceneMode) {
+        case SCENES.DESERT: baseColor1 = '#8d6e63'; baseColor2 = '#5d4037'; break;
+        case SCENES.NIGHT: baseColor1 = '#4a4a4a'; baseColor2 = '#2d2d2d'; break;
+        case SCENES.DUNGEON: baseColor1 = '#546e7a'; baseColor2 = '#37474f'; break;
+        default: baseColor1 = '#66bb6a'; baseColor2 = '#388e3c';
+      }
+      const baseGrad = ctx.createLinearGradient(x, y, x + w, y);
+      baseGrad.addColorStop(0, baseColor1);
+      baseGrad.addColorStop(0.5, baseColor2);
+      baseGrad.addColorStop(1, baseColor1);
+      ctx.fillStyle = baseGrad;
+      ctx.fillRect(x, y, w, h);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(x + 1, y + 1, w - 2, h - 2, 3);
+      ctx.stroke();
+      ctx.restore();
+
+      switch(currentSceneMode) {
+        case SCENES.DESERT:
+          drawDesertObstacle(x, y, w, h, isTop, typeId, fixedSeed);
+          break;
+        case SCENES.NIGHT:
+          drawNightObstacle(x, y, w, h, isTop, typeId, fixedSeed);
+          break;
+        case SCENES.DUNGEON:
+          drawDungeonObstacle(x, y, w, h, isTop, typeId, fixedSeed);
+          break;
+        default:
+          drawClassicObstacle(x, y, w, h, isTop, typeId, fixedSeed);
+      }
+    }
+
+
+    /**
+     * drawDesertObstacle() — 沙漠障碍物类型分发器
+     *
+     * 0=仙人掌(cactus)  1=枯木桩(stump)  2=仙人球(cactus ball)
+     * 3=石像(statue)    4=岩石(rock)
+     *
+     * @param {number} x, y, w, h, isTop, typeId, fixedSeed — 见 drawScenePillar
+     * 返回：无
+     */
+    function drawDesertObstacle(x, y, w, h, isTop, typeId, fixedSeed) {
+      switch(typeId) {
+        case 0: drawDesertCactus(x, y, w, h, isTop, fixedSeed); break;
+        case 1: drawDesertStump(x, y, w, h, isTop, fixedSeed); break;
+        case 2: drawDesertCactusBall(x, y, w, h, isTop, fixedSeed); break;
+        case 3: drawDesertStatue(x, y, w, h, isTop, fixedSeed); break;
+        case 4: drawDesertRock(x, y, w, h, isTop, fixedSeed); break;
+        default: drawDesertCactus(x, y, w, h, isTop, fixedSeed);
+      }
+    }
+
+
+    /**
+     * drawNightObstacle() — 黑夜障碍物类型分发器
+     *
+     * 0=大树(tree)  1=树藤+蜘蛛(vine with spider)
+     * 2=大石头(boulder)  3=枯树桩(stump)  4=墓碑(gravestone)
+     *
+     * 完成场景绘制后额外添加月光轮廓发光（半透明蓝白描边 + 填充），
+     * 使障碍物在黑暗背景中更清晰可见。
+     *
+     * @param {number} x, y, w, h, isTop, typeId, fixedSeed — 见 drawScenePillar
+     * 返回：无
+     */
+    function drawNightObstacle(x, y, w, h, isTop, typeId, fixedSeed) {
+      // 先绘制障碍物本体
+      switch(typeId) {
+        case 0: drawNightTree(x, y, w, h, isTop, fixedSeed); break;
+        case 1: drawNightVineWithSpider(x, y, w, h, isTop, fixedSeed); break;
+        case 2: drawNightBoulder(x, y, w, h, isTop, fixedSeed); break;
+        case 3: drawNightStump(x, y, w, h, isTop, fixedSeed); break;
+        case 4: drawNightGravestone(x, y, w, h, isTop, fixedSeed); break;
+        default: drawNightTree(x, y, w, h, isTop, fixedSeed);
+      }
+      // 添加月光轮廓发光效果，使障碍物在黑夜中更清晰
+      ctx.strokeStyle = 'rgba(150, 200, 255, 0.35)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(x - 1, y - 1, w + 2, h + 2, 4);
+      ctx.stroke();
+      // 月光高光效果
+      ctx.fillStyle = 'rgba(150, 200, 255, 0.06)';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 3);
+      ctx.fill();
+    }
+
+
+    /**
+     * drawDungeonObstacle() — 地下城障碍物类型分发器
+     *
+     * 0=砖块(brick)  1=铁栅栏(bars)  2=矿镐(pickaxe)
+     * 3=带铁钉木棍(spiked log)  4=石柱(pillar)
+     *
+     * @param {number} x, y, w, h, isTop, typeId, fixedSeed — 见 drawScenePillar
+     * 返回：无
+     */
+    function drawDungeonObstacle(x, y, w, h, isTop, typeId, fixedSeed) {
+      switch(typeId) {
+        case 0: drawDungeonBrick(x, y, w, h, isTop, fixedSeed); break;
+        case 1: drawDungeonBars(x, y, w, h, isTop, fixedSeed); break;
+        case 2: drawDungeonPickaxe(x, y, w, h, isTop, fixedSeed); break;
+        case 3: drawDungeonSpikedLog(x, y, w, h, isTop, fixedSeed); break;
+        case 4: drawDungeonPillar(x, y, w, h, isTop, fixedSeed); break;
+        default: drawDungeonBrick(x, y, w, h, isTop, fixedSeed);
+      }
+    }
+
+    /**
+     * drawClassicObstacle() — 绘制经典障碍物
+     */
+
+    /* ================================================================
+     *  障碍物绘制函数 — 三大场景各5种类型，二次元化写实风格
+     * ================================================================ */
+
+    // ---- 沙漠场景障碍物 ----
+
+    /**
+     * drawDesertCactus() — 沙漠仙人掌
+     */
+    function drawDesertCactus(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const cx = x + w / 2;
+
+      const segmentCount = Math.max(1, Math.floor(h / 70));
+      const segmentHeight = h / segmentCount;
+      
+      for (let seg = 0; seg < segmentCount; seg++) {
+        const segY = isTop ? y + seg * segmentHeight : y + h - (seg + 1) * segmentHeight;
+        const segWidth = w * (0.8 + (seg % 2) * 0.15);
+        const segX = cx - segWidth / 2;
+        
+        // 主体渐变（更真实的仙人掌颜色）
+        const bodyGrad = ctx.createLinearGradient(segX, segY, segX + segWidth, segY);
+        bodyGrad.addColorStop(0, '#2d5a27');
+        bodyGrad.addColorStop(0.2, '#3d7c35');
+        bodyGrad.addColorStop(0.5, '#4a9c42');
+        bodyGrad.addColorStop(0.8, '#3d7c35');
+        bodyGrad.addColorStop(1, '#2d5a27');
+        ctx.fillStyle = bodyGrad;
+        
+        // 分段主体形状
+        ctx.beginPath();
+        ctx.roundRect(segX + 4, segY + 2, segWidth - 8, segmentHeight - 4, 6);
+        ctx.fill();
+        
+        // 分段高光
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.beginPath();
+        ctx.roundRect(segX + 8, segY + 6, 8, segmentHeight - 12, 3);
+        ctx.fill();
+        
+        // 分段纹理线
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(segX + segWidth * 0.3, segY + 5);
+        ctx.lineTo(segX + segWidth * 0.3, segY + segmentHeight - 5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(segX + segWidth * 0.7, segY + 5);
+        ctx.lineTo(segX + segWidth * 0.7, segY + segmentHeight - 5);
+        ctx.stroke();
+      }
+      
+      // 侧臂（更精美的分支）
+      if (h > 100) {
+        const armCount = seededRandom(baseSeed + 50) > 0.7 ? 2 : 1;
+        
+        for (let armIdx = 0; armIdx < armCount; armIdx++) {
+          const armSeg = 1 + armIdx;
+          const armY = isTop ? y + armSeg * segmentHeight + segmentHeight / 2 : 
+                               y + h - (armSeg + 1) * segmentHeight + segmentHeight / 2;
+          const armDir = armIdx === 0 ? -1 : 1;
+          const armLength = 30 + seededRandom(baseSeed + 100 + armIdx) * 20;
+          const armWidth = w * 0.5;
+          
+          // 侧臂主体
+          const armGrad = ctx.createLinearGradient(cx, armY, cx + armDir * armLength, armY);
+          armGrad.addColorStop(0, '#3d7c35');
+          armGrad.addColorStop(0.5, '#4a9c42');
+          armGrad.addColorStop(1, '#3d7c35');
+          ctx.fillStyle = armGrad;
+          
+          ctx.beginPath();
+          ctx.moveTo(cx + (armDir === -1 ? -w/2 + 8 : w/2 - 8), armY - armWidth/2);
+          ctx.lineTo(cx + armDir * armLength, armY - armWidth/2);
+          ctx.lineTo(cx + armDir * armLength, armY + armWidth/2);
+          ctx.lineTo(cx + (armDir === -1 ? -w/2 + 8 : w/2 - 8), armY + armWidth/2);
+          ctx.closePath();
+          ctx.fill();
+          
+          // 侧臂高光
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+          ctx.beginPath();
+          ctx.moveTo(cx + (armDir === -1 ? -w/2 + 12 : w/2 - 12), armY - armWidth/2 + 4);
+          ctx.lineTo(cx + armDir * armLength - armDir * 4, armY - armWidth/2 + 4);
+          ctx.lineTo(cx + armDir * armLength - armDir * 4, armY - armWidth/2 + 10);
+          ctx.lineTo(cx + (armDir === -1 ? -w/2 + 12 : w/2 - 12), armY - armWidth/2 + 10);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+      
+      // 刺（更密集更真实）
+      const spineColor = '#1a3d16';
+      for (let i = 10; i < h - 10; i += 8) {
+        const cy = isTop ? y + h - i : y + i;
+        const spineOffset = (i % 16) * 0.5;
+        
+        // 左侧刺组
+        ctx.strokeStyle = spineColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x + 6, cy); ctx.lineTo(x - 3, cy - 4 + spineOffset); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + 6, cy); ctx.lineTo(x - 3, cy + 2 + spineOffset); ctx.stroke();
+        
+        // 右侧刺组
+        ctx.beginPath(); ctx.moveTo(x + w - 6, cy); ctx.lineTo(x + w + 3, cy - 4 + spineOffset); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + w - 6, cy); ctx.lineTo(x + w + 3, cy + 2 + spineOffset); ctx.stroke();
+        
+        // 中间刺（朝向内侧）
+        ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx - 14, cy - 3); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + 14, cy - 3); ctx.stroke();
+      }
+      
+      // 顶部装饰（花朵或尖刺）
+      if (h > 60) {
+        const topY = isTop ? y + 8 : y + h - 8;
+        
+        if (seededRandom(baseSeed + 200) > 0.3) {
+          // 精美花朵
+          const petalColors = ['#ffb74d', '#ff9800', '#f57c00', '#ef6c00'];
+          
+          // 花瓣层
+          for (let layer = 0; layer < 2; layer++) {
+            const petalCount = 8;
+            const radius = 5 + layer * 3;
+            for (let i = 0; i < petalCount; i++) {
+              const angle = (i / petalCount) * Math.PI * 2 + layer * 0.2;
+              const px = cx + Math.cos(angle) * radius;
+              const py = topY + Math.sin(angle) * radius * 0.5;
+              
+              ctx.fillStyle = petalColors[layer % petalColors.length];
+              ctx.beginPath();
+              ctx.ellipse(px, py, 3, 5, angle, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+          
+          // 花蕊
+          ctx.fillStyle = '#fff176';
+          ctx.beginPath(); ctx.arc(cx, topY, 3, 0, Math.PI * 2); ctx.fill();
+          
+          // 花蕊高光
+          ctx.fillStyle = '#fffde7';
+          ctx.beginPath(); ctx.arc(cx - 1, topY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+        } else {
+          // 顶部尖刺
+          ctx.fillStyle = '#3d7c35';
+          for (let i = 0; i < 3; i++) {
+            const angle = (i - 1) * 0.4;
+            ctx.beginPath();
+            ctx.moveTo(cx + (i - 1) * 4, topY);
+            ctx.lineTo(cx + (i - 1) * 6 - Math.sin(angle) * 4, topY - 8 - Math.cos(angle) * 4);
+            ctx.lineTo(cx + (i - 1) * 4 + Math.sin(angle) * 2, topY);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+      }
+      
+      // 添加阴影边缘
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(x + 2, y + 2, w - 4, h - 4, 4);
+      ctx.stroke();
+    }
+
+    /**
+     * drawDesertStump() — 沙漠枯木桩
+     */
+    function drawDesertStump(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 主体
+      const grad = ctx.createLinearGradient(x, y, x + w, y);
+      grad.addColorStop(0, '#8d6e63');
+      grad.addColorStop(0.5, '#a1887f');
+      grad.addColorStop(1, '#6d4c41');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(x + 4, y, w - 8, h, 4);
+      ctx.fill();
+      // 年轮（端面）
+      const ringY = isTop ? y + h - 6 : y + 6;
+      ctx.strokeStyle = '#5d4037';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x + w/2, ringY, 8, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + w/2, ringY, 4, 0, Math.PI * 2); ctx.stroke();
+      // 裂纹
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + w/2, y + (isTop ? h * 0.3 : 0));
+      ctx.lineTo(x + w/2 + 5, y + (isTop ? h * 0.6 : h * 0.4));
+      ctx.stroke();
+    }
+
+    /**
+     * drawDesertCactusBall() — 沙漠仙人球（圆形）
+     */
+    function drawDesertCactusBall(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 球体（椭圆）
+      const grad = ctx.createRadialGradient(x + w/2, y + h/2, 2, x + w/2, y + h/2, Math.max(w, h) * 0.5);
+      grad.addColorStop(0, '#66bb6a');
+      grad.addColorStop(0.7, '#4caf50');
+      grad.addColorStop(1, '#2e7d32');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, y + h/2, w/2 - 2, h/2 - 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 棱线
+      ctx.strokeStyle = 'rgba(27,94,32,0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI;
+        ctx.beginPath();
+        ctx.ellipse(x + w/2, y + h/2, w/2 - 2, h/2 - 2, a, 0, Math.PI);
+        ctx.stroke();
+      }
+      // 小花
+      ctx.fillStyle = '#ff80ab';
+      ctx.beginPath(); ctx.arc(x + w/2, y + (isTop ? 6 : h - 6), 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff9c4';
+      ctx.beginPath(); ctx.arc(x + w/2, y + (isTop ? 6 : h - 6), 2, 0, Math.PI * 2); ctx.fill();
+    }
+
+    /**
+     * drawDesertStatue() — 沙漠石像（人形轮廓）
+     */
+    function drawDesertStatue(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const cx = x + w/2;
+      // 身体
+      ctx.fillStyle = '#bcaaa4';
+      ctx.beginPath();
+      ctx.roundRect(x + 8, y, w - 16, h, 4);
+      ctx.fill();
+      // 头部
+      ctx.fillStyle = '#a1887f';
+      const headY = isTop ? y + h - 16 : y + 10;
+      ctx.beginPath();
+      ctx.ellipse(cx, headY, 10, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 面部
+      ctx.fillStyle = '#5d4037';
+      ctx.beginPath(); ctx.arc(cx - 3, headY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + 3, headY - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+      // 风化纹理
+      ctx.fillStyle = 'rgba(0,0,0,0.08)';
+      for (let i = 0; i < Math.floor(h / 25); i++) {
+        ctx.beginPath();
+        ctx.arc(x + 10 + seededRandom(baseSeed + i * 5) * (w - 20), y + 10 + i * 25, 2 + seededRandom(baseSeed + i * 5 + 1) * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    /**
+     * drawDesertRock() — 沙漠岩石
+     */
+    function drawDesertRock(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 主体
+      const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+      grad.addColorStop(0, '#b0bec5');
+      grad.addColorStop(0.5, '#90a4ae');
+      grad.addColorStop(1, '#78909c');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(x + 3, y, w - 6, h, 8);
+      ctx.fill();
+      // 高光
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.beginPath();
+      ctx.roundRect(x + 6, y + 3, w * 0.3, h * 0.4, 4);
+      ctx.fill();
+      // 裂纹
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + w/2, y + (isTop ? h * 0.2 : 0));
+      ctx.lineTo(x + w/2 - 5, y + (isTop ? h * 0.5 : h * 0.4));
+      ctx.lineTo(x + w/2 + 3, y + (isTop ? h * 0.8 : h * 0.7));
+      ctx.stroke();
+    }
+
+    // ---- 黑夜场景障碍物 ----
+
+    /**
+     * drawNightTree() — 黑夜大树（精美写实风格）
+     */
+    function drawNightTree(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const cx = x + w / 2;
+
+      const trunkGrad = ctx.createLinearGradient(x, y, x + w, y);
+      trunkGrad.addColorStop(0, '#2d1f17');
+      trunkGrad.addColorStop(0.5, '#3d2d20');
+      trunkGrad.addColorStop(1, '#2d1f17');
+      ctx.fillStyle = trunkGrad;
+
+      ctx.beginPath();
+      const baseWidth = w;
+      const topWidth = w * 0.8;
+      const baseX = cx - baseWidth / 2;
+      const topX = cx - topWidth / 2;
+
+      ctx.moveTo(baseX, y + h);
+      ctx.lineTo(topX, y);
+      ctx.lineTo(topX + topWidth, y);
+      ctx.lineTo(baseX + baseWidth, y + h);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.beginPath();
+      ctx.moveTo(baseX + 8, y + h);
+      ctx.lineTo(topX + 8, y);
+      ctx.lineTo(topX + 12, y);
+      ctx.lineTo(baseX + 12, y + h);
+      ctx.closePath();
+      ctx.fill();
+
+      // 树冠
+      if (h > 40) {
+        const crownY = isTop ? y + 5 : y + h - 5;
+        const crownSize = w * 0.7;
+        ctx.fillStyle = '#154d15';
+        ctx.beginPath();
+        ctx.arc(cx - 6, crownY, crownSize * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#1a5a1a';
+        ctx.beginPath();
+        ctx.arc(cx + 4, crownY - 2, crownSize * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(100, 180, 100, 0.2)';
+        ctx.beginPath();
+        ctx.arc(cx - 3, crownY - 3, crownSize * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    /**
+     * drawNightVineWithSpider() — 黑夜树藤+垂落蜘蛛（精美写实风格）
+     */
+    function drawNightVineWithSpider(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+
+      // 主藤
+      ctx.strokeStyle = '#2e5a1c';
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      const startY = isTop ? y : y + h;
+      ctx.moveTo(x + w/2, startY);
+      const step = 15;
+      const totalSteps = Math.min(Math.floor(h / step), 20);
+      for (let i = 0; i < totalSteps; i++) {
+        const py = isTop ? y + (i + 1) * step : y + h - (i + 1) * step;
+        const ox = Math.sin(i * 0.6) * 6;
+        ctx.lineTo(x + w/2 + ox, py);
+      }
+      ctx.stroke();
+
+      // 叶片
+      const leafCount = Math.min(Math.floor(h / 35), 6);
+      for (let i = 0; i < leafCount; i++) {
+        const leafY = isTop ? y + 20 + i * 30 : y + h - 20 - i * 30;
+        const leafX = x + w/2 + (i % 2 === 0 ? 10 : -10);
+        ctx.fillStyle = '#4caf50';
+        ctx.beginPath();
+        ctx.ellipse(leafX, leafY, 6, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 蜘蛛（仅上方障碍物）
+      if (isTop && h > 80) {
+        const spiderCount = Math.min(2, Math.floor(h / 80));
+        for (let i = 0; i < spiderCount; i++) {
+          const spiderY = y + 40 + i * 60;
+          const spiderX = x + w/2 + Math.sin(i * 1.2) * 4;
+
+          ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(spiderX, y);
+          ctx.lineTo(spiderX, spiderY);
+          ctx.stroke();
+
+          ctx.fillStyle = '#1a1a1a';
+          ctx.beginPath();
+          ctx.ellipse(spiderX, spiderY, 4, 5, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#1a1a1a';
+          ctx.lineWidth = 1;
+          for (let leg = 0; leg < 4; leg++) {
+            const legAngle = (leg / 4) * Math.PI - Math.PI / 2;
+            const legLength = 5 + leg;
+            ctx.beginPath();
+            ctx.moveTo(spiderX - 2, spiderY);
+            ctx.lineTo(spiderX - 2 - Math.cos(legAngle) * legLength, spiderY + Math.sin(legAngle) * legLength);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(spiderX + 2, spiderY);
+            ctx.lineTo(spiderX + 2 + Math.cos(legAngle) * legLength, spiderY + Math.sin(legAngle) * legLength);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    /**
+     * drawNightBoulder() — 黑夜大石头
+     */
+    function drawNightBoulder(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 主体
+      const grad = ctx.createRadialGradient(x + w/2, y + h/2, 2, x + w/2, y + h/2, Math.max(w, h) * 0.5);
+      grad.addColorStop(0, '#78909c');
+      grad.addColorStop(0.6, '#546e7a');
+      grad.addColorStop(1, '#37474f');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, y + h/2, w/2 - 2, h/2 - 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 高光
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.beginPath();
+      ctx.ellipse(x + w/2 - 5, y + h/3, 6, 4, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+      // 苔藓
+      ctx.fillStyle = 'rgba(76,175,80,0.25)';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(x + 8 + seededRandom(baseSeed + i * 7) * (w - 16), y + seededRandom(baseSeed + i * 7 + 1) * h, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    /**
+     * drawNightStump() — 黑夜枯树桩
+     */
+    function drawNightStump(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 主体
+      ctx.fillStyle = '#4e342e';
+      ctx.beginPath();
+      ctx.roundRect(x + 6, y, w - 12, h, 3);
+      ctx.fill();
+      // 截面
+      const cutY = isTop ? y + h - 8 : y + 8;
+      ctx.fillStyle = '#3e2723';
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, cutY, w/2 - 8, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 年轮
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.ellipse(x + w/2, cutY, 8, 3, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(x + w/2, cutY, 4, 1.5, 0, 0, Math.PI * 2); ctx.stroke();
+      // 裂纹
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + w/2, y + (isTop ? 0 : h));
+      ctx.lineTo(x + w/2 + 4, y + h * 0.5);
+      ctx.stroke();
+    }
+
+    /**
+     * drawNightGravestone() — 黑夜墓碑
+     */
+    function drawNightGravestone(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const cx = x + w/2;
+      // 主体
+      ctx.fillStyle = '#455a64';
+      ctx.beginPath();
+      ctx.roundRect(x + 6, y, w - 12, h - 8, 3);
+      ctx.fill();
+      // 圆顶
+      const topY = isTop ? y + h - 8 : y + 8;
+      ctx.beginPath();
+      ctx.arc(cx, topY, w/2 - 8, isTop ? Math.PI : 0, isTop ? 0 : Math.PI);
+      ctx.fill();
+      // 十字
+      ctx.strokeStyle = 'rgba(200,200,200,0.4)';
+      ctx.lineWidth = 2;
+      const crossY = isTop ? y + h * 0.4 : y + h * 0.3;
+      ctx.beginPath();
+      ctx.moveTo(cx, crossY - 8);
+      ctx.lineTo(cx, crossY + 8);
+      ctx.moveTo(cx - 5, crossY - 2);
+      ctx.lineTo(cx + 5, crossY - 2);
+      ctx.stroke();
+      // 文字
+      ctx.font = '8px monospace';
+      ctx.fillStyle = 'rgba(200,200,200,0.3)';
+      ctx.textAlign = 'center';
+      ctx.fillText('R.I.P', cx, crossY + 18);
+    }
+
+    // ---- 地下城场景障碍物 ----
+
+    /**
+     * drawDungeonBrick() — 地下城砖块（石砖砌墙）
+     */
+    function drawDungeonBrick(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 主体
+      ctx.fillStyle = '#455a64';
+      ctx.beginPath();
+      ctx.roundRect(x + 2, y, w - 4, h, 2);
+      ctx.fill();
+      // 砖缝
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 1;
+      const brickH = 14;
+      for (let row = 0; row < Math.floor(h / brickH); row++) {
+        const by = y + row * brickH;
+        // 横缝
+        ctx.beginPath(); ctx.moveTo(x + 2, by); ctx.lineTo(x + w - 2, by); ctx.stroke();
+        // 竖缝（交错）
+        const offset = (row % 2) * (w / 2);
+        ctx.beginPath(); ctx.moveTo(x + offset + w/4, by); ctx.lineTo(x + offset + w/4, by + brickH); ctx.stroke();
+      }
+      // 边框高光
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(x + 2, y, w - 4, h, 2);
+      ctx.stroke();
+    }
+
+    /**
+     * drawDungeonBars() — 地下城铁栅栏
+     */
+    function drawDungeonBars(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 横杆
+      ctx.fillStyle = '#546e7a';
+      const barCount = 4;
+      const spacing = w / (barCount + 1);
+      for (let i = 1; i <= barCount; i++) {
+        const bx = x + i * spacing - 2;
+        // 竖杆
+        const barGrad = ctx.createLinearGradient(bx, y, bx + 4, y);
+        barGrad.addColorStop(0, '#78909c');
+        barGrad.addColorStop(0.5, '#b0bec5');
+        barGrad.addColorStop(1, '#607d8b');
+        ctx.fillStyle = barGrad;
+        ctx.beginPath();
+        ctx.roundRect(bx, y, 4, h, 2);
+        ctx.fill();
+      }
+      // 横梁
+      const railGrad = ctx.createLinearGradient(x, y, x, y + 4);
+      railGrad.addColorStop(0, '#90a4ae');
+      railGrad.addColorStop(1, '#546e7a');
+      ctx.fillStyle = railGrad;
+      ctx.beginPath(); ctx.roundRect(x, y + (isTop ? h - 10 : 4), w, 4, 2); ctx.fill();
+      ctx.beginPath(); ctx.roundRect(x, y + (isTop ? 4 : h - 10), w, 4, 2); ctx.fill();
+      // 锈斑
+      ctx.fillStyle = 'rgba(183,28,28,0.2)';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(x + 8 + seededRandom(baseSeed + i * 5) * (w - 16), y + seededRandom(baseSeed + i * 5 + 1) * h, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    /**
+     * drawDungeonPickaxe() — 地下城矿镐
+     */
+    function drawDungeonPickaxe(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const cx = x + w/2;
+      // 柄
+      ctx.fillStyle = '#6d4c41';
+      ctx.beginPath();
+      ctx.roundRect(cx - 3, y, 6, h, 2);
+      ctx.fill();
+      // 镐头
+      const headY = isTop ? y + h - 10 : y + 10;
+      ctx.fillStyle = '#78909c';
+      ctx.beginPath();
+      ctx.moveTo(cx - 16, headY + 3);
+      ctx.lineTo(cx - 6, headY - 3);
+      ctx.lineTo(cx - 4, headY);
+      ctx.lineTo(cx + 4, headY);
+      ctx.lineTo(cx + 6, headY - 3);
+      ctx.lineTo(cx + 16, headY + 3);
+      ctx.lineTo(cx + 6, headY + 6);
+      ctx.lineTo(cx + 4, headY + 3);
+      ctx.lineTo(cx - 4, headY + 3);
+      ctx.lineTo(cx - 6, headY + 6);
+      ctx.closePath();
+      ctx.fill();
+      // 金属高光
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.beginPath();
+      ctx.ellipse(cx - 10, headY, 4, 2, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    /**
+     * drawDungeonSpikedLog() — 地下城带铁钉木棍
+     */
+    function drawDungeonSpikedLog(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const cx = x + w/2;
+      // 木棍主体
+      const logGrad = ctx.createLinearGradient(x, y, x + w, y);
+      logGrad.addColorStop(0, '#795548');
+      logGrad.addColorStop(0.5, '#8d6e63');
+      logGrad.addColorStop(1, '#6d4c41');
+      ctx.fillStyle = logGrad;
+      ctx.beginPath();
+      ctx.roundRect(x + 6, y, w - 12, h, 4);
+      ctx.fill();
+      // 木纹
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.lineWidth = 1;
+      for (let i = 10; i < h - 10; i += 16) {
+        const cy = isTop ? y + h - i : y + i;
+        ctx.beginPath(); ctx.moveTo(x + 8, cy); ctx.lineTo(x + w - 8, cy); ctx.stroke();
+      }
+      // 铁钉
+      ctx.fillStyle = '#90a4ae';
+      for (let i = 8; i < h - 8; i += 20) {
+        const ny = isTop ? y + h - i : y + i;
+        // 左侧钉
+        ctx.beginPath();
+        ctx.moveTo(x + 6, ny - 3);
+        ctx.lineTo(x - 2, ny);
+        ctx.lineTo(x + 6, ny + 3);
+        ctx.closePath();
+        ctx.fill();
+        // 右侧钉
+        ctx.beginPath();
+        ctx.moveTo(x + w - 6, ny - 3);
+        ctx.lineTo(x + w + 2, ny);
+        ctx.lineTo(x + w - 6, ny + 3);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    /**
+     * drawDungeonPillar() — 地下城石柱
+     */
+    function drawDungeonPillar(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 主体
+      const grad = ctx.createLinearGradient(x, y, x + w, y);
+      grad.addColorStop(0, '#546e7a');
+      grad.addColorStop(0.3, '#78909c');
+      grad.addColorStop(0.7, '#607d8b');
+      grad.addColorStop(1, '#455a64');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(x + 8, y + 4, w - 16, h - 8, 4);
+      ctx.fill();
+      // 柱头
+      ctx.fillStyle = '#455a64';
+      ctx.beginPath();
+      ctx.roundRect(x + 4, y + (isTop ? 0 : h - 10), w - 8, 10, 3);
+      ctx.fill();
+      // 柱座
+      ctx.fillStyle = '#37474f';
+      ctx.beginPath();
+      ctx.roundRect(x + 2, y + (isTop ? h - 6 : 0), w - 4, 6, 2);
+      ctx.fill();
+      // 裂缝
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + w/2, y + (isTop ? h * 0.3 : 0));
+      ctx.lineTo(x + w/2 - 4, y + (isTop ? h * 0.6 : h * 0.4));
+      ctx.lineTo(x + w/2 + 3, y + (isTop ? h * 0.8 : h * 0.7));
+      ctx.stroke();
+    }
+
+    // ---- 经典场景障碍物（保留5种）----
+
+
+    /**
+     * drawClassicObstacle() — 经典障碍物类型分发器
+     *
+     * 0=竹子(bamboo)  1=藤蔓石头(vine rock)  2=仙人掌(cactus)
+     * 3=铁棍(iron bar)  4=原木(wooden log)
+     *
+     * @param {number} x, y, w, h, isTop, typeId, fixedSeed — 见 drawScenePillar
+     * 返回：无
+     */
+    function drawClassicObstacle(x, y, w, h, isTop, typeId, fixedSeed) {
+      switch(typeId) {
+        case 0: drawBamboo(x, y, w, h, isTop, fixedSeed); break;
+        case 1: drawVineRock(x, y, w, h, isTop, fixedSeed); break;
+        case 2: drawCactus(x, y, w, h, isTop, fixedSeed); break;
+        case 3: drawIronBar(x, y, w, h, isTop, fixedSeed); break;
+        case 4: drawWoodenLog(x, y, w, h, isTop, fixedSeed); break;
+        default: drawBamboo(x, y, w, h, isTop, fixedSeed);
+      }
+    }
+
+    /**
+     * drawBamboo() — 绘制竹子障碍物
+     */
+    function drawBamboo(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const bambooGrad = ctx.createLinearGradient(x, y, x + w, y);
+      bambooGrad.addColorStop(0, '#2e7d32');
+      bambooGrad.addColorStop(0.5, '#4caf50');
+      bambooGrad.addColorStop(1, '#1b5e20');
+      ctx.fillStyle = bambooGrad;
+      ctx.beginPath();
+      ctx.roundRect(x + 8, y, w - 16, h, 4);
+      ctx.fill();
+      // 竹节
+      ctx.fillStyle = '#1b5e20';
+      for (let i = 20; i < h - 10; i += 30) {
+        const ny = isTop ? y + h - i : y + i;
+        ctx.beginPath();
+        ctx.roundRect(x + 6, ny - 3, w - 12, 6, 2);
+        ctx.fill();
+      }
+      // 高光
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.beginPath();
+      ctx.roundRect(x + 12, y + 3, 4, h - 6, 2);
+      ctx.fill();
+    }
+
+    /**
+     * drawVineRock() — 绘制被绿藤缠绕的石头障碍物
+     */
+    function drawVineRock(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      // 石头主体
+      const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+      grad.addColorStop(0, '#78909c');
+      grad.addColorStop(0.5, '#607d8b');
+      grad.addColorStop(1, '#455a64');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(x + 3, y, w - 6, h, 8);
+      ctx.fill();
+      // 藤蔓
+      ctx.strokeStyle = '#4caf50';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      const vineStart = isTop ? y : y + h;
+      ctx.moveTo(x + 5, vineStart);
+      for (let i = 0; i < h / 15; i++) {
+        const vy = isTop ? y + i * 15 : y + h - i * 15;
+        ctx.lineTo(x + 5 + Math.sin(i * 1.2) * 10, vy);
+      }
+      ctx.stroke();
+      // 小叶片
+      ctx.fillStyle = '#66bb6a';
+      for (let i = 0; i < Math.floor(h / 25); i++) {
+        const ly = isTop ? y + 15 + i * 25 : y + h - 15 - i * 25;
+        ctx.beginPath();
+        ctx.ellipse(x + 8 + seededRandom(baseSeed + i) * (w - 16), ly, 4, 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    /**
+     * drawCactus() — 绘制经典仙人掌障碍物
+     */
+    function drawCactus(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const bodyColor = '#2e7d32';
+      const darkColor = '#1b5e20';
+      ctx.fillStyle = bodyColor;
+      ctx.beginPath();
+      ctx.roundRect(x + 8, y, w - 16, h, 5);
+      ctx.fill();
+      // 刺
+      ctx.strokeStyle = darkColor;
+      ctx.lineWidth = 1;
+      for (let i = 12; i < h - 12; i += 14) {
+        const cy = isTop ? y + h - i : y + i;
+        ctx.beginPath(); ctx.moveTo(x + 8, cy); ctx.lineTo(x + 2, cy - 3); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + w - 8, cy); ctx.lineTo(x + w - 2, cy - 3); ctx.stroke();
+      }
+    }
+
+    /**
+     * drawIronBar() — 绘制铁棍障碍物
+     */
+    function drawIronBar(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const barGrad = ctx.createLinearGradient(x, y, x + w, y);
+      barGrad.addColorStop(0, '#78909c');
+      barGrad.addColorStop(0.3, '#b0bec5');
+      barGrad.addColorStop(0.7, '#90a4ae');
+      barGrad.addColorStop(1, '#546e7a');
+      ctx.fillStyle = barGrad;
+      ctx.beginPath();
+      ctx.roundRect(x + 12, y, w - 24, h, 3);
+      ctx.fill();
+      // 高光
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.beginPath();
+      ctx.roundRect(x + 14, y + 2, 4, h - 4, 2);
+      ctx.fill();
+      // 锈迹
+      ctx.fillStyle = 'rgba(183,28,28,0.15)';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(x + 14 + seededRandom(baseSeed + i * 3) * (w - 28), y + seededRandom(baseSeed + i * 3 + 1) * h, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    /**
+     * drawWoodenLog() — 绘制原木障碍物
+     */
+    function drawWoodenLog(x, y, w, h, isTop, fixedSeed) {
+      const baseSeed = fixedSeed || 0;
+      const logGrad = ctx.createLinearGradient(x, y, x + w, y);
+      logGrad.addColorStop(0, '#6d4c41');
+      logGrad.addColorStop(0.5, '#8d6e63');
+      logGrad.addColorStop(1, '#5d4037');
+      ctx.fillStyle = logGrad;
+      ctx.beginPath();
+      ctx.roundRect(x + 4, y, w - 8, h, 5);
+      ctx.fill();
+      // 木纹
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.lineWidth = 1;
+      for (let i = 12; i < h - 10; i += 18) {
+        const cy = isTop ? y + h - i : y + i;
+        ctx.beginPath(); ctx.moveTo(x + 6, cy); ctx.lineTo(x + w - 6, cy + 2); ctx.stroke();
+      }
+      // 树皮
+      ctx.fillStyle = '#4e342e';
+      ctx.beginPath();
+      ctx.roundRect(x + 4, y, w - 8, 5, 2);
+      ctx.fill();
+    }
+
+
+
+    /**
+     * drawHUD() — 绘制游戏 HUD 信息（计时/速度/安全提示/静音按钮）
+     *
+     * 显示内容（按绘制顺序）：
+     * 1. 计时器：居上半透明黑底圆角矩形(120x40) + 粗体 mm:ss
+     * 2. 制作者信息：左上角 制作者：云洲
+     * 3. 速度显示：右上角 速度：xx.x
+     * 4. 安全保护提示（safeTimer > 0 时）：鸟上方闪烁 安全 文字
+     *    透明度 = safeTimer / SAFE_FRAMES
+     * 5. 静音按钮：右下角半透明底 + 图标文字（emoji + 状态 + (M) 快捷键提示）
+     *    点击区域增大至 120x22，方便移动端触控
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawHUD() {
+      const secs = Math.floor(frameCount / 60);
+      const m = String(Math.floor(secs / 60)).padStart(2, '0');
+      const s = String(secs % 60).padStart(2, '0');
+
+      // 计时器背景
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.fillRect(W / 2 - 60, 10, 120, 40);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(W / 2 - 60, 10, 120, 40);
+
+      // 计时器文字
+      ctx.font = 'bold 28px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(m + ':' + s, W / 2, 18);
+
+      // 制作者信息
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.fillText('制作者：云洲', 10, 16);
+
+      // 速度显示
+      ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillText('速度：' + gameSpeed.toFixed(1), W - 10, 16);
+
+      // 安全保护提示
+      if (safeTimer > 0) {
+        const alpha = safeTimer / SAFE_FRAMES;
+        ctx.font = 'bold 14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = `rgba(255, 255, 170, ${alpha})`;
+        ctx.fillText('✨ 安全 ✨', BIRD_X + 14, bird.y - 15);
+      }
+
+      // 静音按钮（增大点击区域，方便移动端触控）
+      const muteBtnW = 120;
+      const muteBtnH = 22;
+      const muteBtnX = W - muteBtnW - 5;
+      const muteBtnY = H - muteBtnH - 3;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.roundRect(muteBtnX, muteBtnY, muteBtnW, muteBtnH, 6);
+      ctx.fill();
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = isMuted ? '#ff6666' : '#66ff66';
+      ctx.fillText(isMuted ? '🔇 静音 (M)' : '🔊 声音 (M)', muteBtnX + muteBtnW / 2, muteBtnY + muteBtnH / 2 + 4);
+    }
+
+    /**
+     * drawStartScreen() — 画精美的开始界面
+     * 使用 START_LAYOUT 全局坐标，与点击事件同步
+     */
+    // 开始界面全局布局常量（绘制与点击共用）
+    const START_LAYOUT = {
+      titleY: 50,
+      subtitleY: 82,
+      authorY: 108,
+      sceneLabelY: 138,
+      sceneBtnY: 170,
+      sceneSpacing: 135,
+      sceneX: 300,
+      diffLabelY: 138,
+      diffBtnY: 170,
+      diffSpacing: 115,
+      diffX: 700,
+      skinLabelY: 235,
+      skinBtnY: 267,
+      skinSpacing: 92,
+      btnY: 350,
+      btnW: 220,
+      btnH: 56
+    };
+
+
+    /**
+     * drawStartScreen() — 绘制精美的游戏开始界面
+     *
+     * 所有 UI 坐标使用 START_LAYOUT 全局常量，与 handleUIClick 的点击检测共用，
+     * 确保点击区域与视觉元素精确对齐。
+     *
+     * 绘制层次（由远到近）：
+     * 1. 径向半透明遮罩（中心透明边缘暗化）
+     * 2. 标题金色光晕（3 圈同心圆 + 径向渐变底）
+     * 3. 标题文字 肥啾向前飞（金色，shadowBlur=30 发光）
+     * 4. 副标题 + 作者署名
+     * 5. 场景选择：3 个单选按钮（沙漠/黑夜/地下城）
+     * 6. 难度选择：3 个单选按钮（简单/中等/困难）
+     * 7. 角色皮肤选择：5 个单选按钮（经典/萌黄/蓝色/粉色/绿色）
+     * 8. 开始游戏按钮：悬停时缩放 1.06x + 增强光晕 + 阴影
+     * 9. 底部操作提示 + 版本信息
+     * 10. 教程提示（低难度下显示，alpha 从 1 渐变至 0，300 帧后完全消失）
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawStartScreen() {
+      const overlayGrad = ctx.createRadialGradient(W/2, H/2, 50, W/2, H/2, 550);
+      overlayGrad.addColorStop(0, 'rgba(0, 0, 0, 0.1)');
+      overlayGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.35)');
+      overlayGrad.addColorStop(1, 'rgba(0, 0, 0, 0.7)');
+      ctx.fillStyle = overlayGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const L = START_LAYOUT;
+
+      for (let i = 3; i > 0; i--) {
+        ctx.beginPath();
+        ctx.arc(W / 2, L.titleY, 60 + i * 25, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(252, 219, 90, ${0.05 + i * 0.02})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      const titleGlow = ctx.createRadialGradient(W/2, L.titleY, 20, W/2, L.titleY, 120);
+      titleGlow.addColorStop(0, 'rgba(252, 219, 90, 0.15)');
+      titleGlow.addColorStop(0.5, 'rgba(252, 219, 90, 0.05)');
+      titleGlow.addColorStop(1, 'rgba(252, 219, 90, 0)');
+      ctx.fillStyle = titleGlow;
+      ctx.beginPath();
+      ctx.roundRect(W/2 - 180, L.titleY - 36, 360, 68, 18);
+      ctx.fill();
+
+      ctx.shadowColor = '#fcdb5a';
+      ctx.shadowBlur = 30;
+      ctx.font = 'bold 48px monospace';
+      ctx.fillStyle = '#fcdb5a';
+      ctx.fillText('肥啾向前飞', W / 2, L.titleY);
+      ctx.shadowBlur = 0;
+
+      ctx.font = '15px monospace';
+      ctx.fillStyle = 'rgba(255, 235, 59, 0.7)';
+      ctx.fillText('Flappy Fat Bird', W / 2, L.subtitleY);
+
+      ctx.font = '13px monospace';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillText('制作者：云洲', W / 2, L.authorY);
+
+      const sceneLabels = ['🌵 沙漠', '🌙 黑夜', '🏰 地下城'];
+      const sceneKeys = [SCENES.DESERT, SCENES.NIGHT, SCENES.DUNGEON];
+      const diffLabels = ['🌸 简单', '⚡ 中等', '🔥 困难'];
+      const diffKeys = [DIFFICULTY_LEVELS.LOW, DIFFICULTY_LEVELS.MEDIUM, DIFFICULTY_LEVELS.HIGH];
+
+      ctx.font = 'bold 16px monospace';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillText('选择场景', L.sceneX, L.sceneLabelY);
+      ctx.fillText('选择难度', L.diffX, L.diffLabelY);
+
+      for (let i = 0; i < 3; i++) {
+        const rx = L.sceneX + (i - 1) * L.sceneSpacing;
+        const ry = L.sceneBtnY;
+        const isSelected = currentSceneMode === sceneKeys[i];
+        drawRadioBtn(rx, ry, isSelected, sceneLabels[i]);
+      }
+      for (let i = 0; i < 3; i++) {
+        const rx = L.diffX + (i - 1) * L.diffSpacing;
+        const ry = L.diffBtnY;
+        const isSelected = currentDifficulty === diffKeys[i];
+        drawRadioBtn(rx, ry, isSelected, diffLabels[i]);
+      }
+
+      const skinKeys = [SKINS.ORIGINAL, SKINS.YELLOW_CUTE, SKINS.BLUE_BIRD, SKINS.PINK_PARROT, SKINS.GREEN_FINCH];
+      const skinLabels = ['🐦 经典', '🐥 萌黄', '🦋 蓝色', '🦩 粉色', '🌿 绿色'];
+
+      ctx.font = 'bold 16px monospace';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillText('选择角色', W / 2, L.skinLabelY);
+
+      for (let i = 0; i < 5; i++) {
+        const rx = W / 2 + (i - 2) * L.skinSpacing;
+        const ry = L.skinBtnY;
+        const isSelected = currentSkin === skinKeys[i];
+        drawRadioBtn(rx, ry, isSelected, skinLabels[i]);
+      }
+
+      const isHovering = isHoveringStartBtn;
+      const scale = isHovering ? 1.06 : 1;
+      const scaledW = L.btnW * scale;
+      const scaledH = L.btnH * scale;
+      const scaledX = W / 2 - scaledW / 2;
+      const scaledY = L.btnY;
+
+      const glowRadius = isHovering ? 25 : 12;
+      const glowGrad = ctx.createRadialGradient(W/2, scaledY + scaledH/2, 10, W/2, scaledY + scaledH/2, scaledW/2 + glowRadius);
+      glowGrad.addColorStop(0, 'rgba(255, 200, 50, 0.3)');
+      glowGrad.addColorStop(0.5, 'rgba(255, 200, 50, 0.1)');
+      glowGrad.addColorStop(1, 'rgba(255, 200, 50, 0)');
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.roundRect(scaledX - glowRadius/2, scaledY - glowRadius/2, scaledW + glowRadius, scaledH + glowRadius, 18);
+      ctx.fill();
+
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+      ctx.shadowBlur = isHovering ? 20 : 12;
+      ctx.shadowOffsetY = isHovering ? 8 : 5;
+
+      const btnGrad = ctx.createLinearGradient(scaledX, scaledY, scaledX, scaledY + scaledH);
+      btnGrad.addColorStop(0, isHovering ? '#fff176' : '#ffeb3b');
+      btnGrad.addColorStop(0.3, isHovering ? '#ffe082' : '#ffca28');
+      btnGrad.addColorStop(0.7, isHovering ? '#ffca28' : '#ffb74d');
+      btnGrad.addColorStop(1, isHovering ? '#ffb300' : '#ffa726');
+      ctx.fillStyle = btnGrad;
+      ctx.beginPath();
+      ctx.roundRect(scaledX, scaledY, scaledW, scaledH, 14);
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(scaledX, scaledY, scaledW, scaledH, 14);
+      ctx.stroke();
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      ctx.font = 'bold 24px monospace';
+      ctx.fillStyle = '#3e2723';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+      ctx.shadowBlur = 2;
+      ctx.fillText('🎮 开始游戏', W / 2, scaledY + scaledH / 2);
+      ctx.shadowBlur = 0;
+
+      ctx.font = '13px monospace';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.fillText('空格/触摸：飞行 · 按住：持续上升 · 触摸任意位置均可操控', W / 2, H - 35);
+
+      ctx.font = '11px monospace';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.fillText('Version 7.1 · M键静音', W / 2, H - 15);
+
+      if (currentDifficulty === DIFFICULTY_LEVELS.LOW && difficultyConfig.hasTutorial) {
+        const tutorialAlpha = Math.max(0, 1 - tutorialTimer / 300);
+        if (tutorialAlpha > 0) {
+          ctx.fillStyle = `rgba(0, 0, 0, ${tutorialAlpha * 0.5})`;
+          ctx.beginPath();
+          ctx.roundRect(W/2 - 140, H - 92, 280, 48, 10);
+          ctx.fill();
+
+          ctx.font = 'bold 14px monospace';
+          ctx.fillStyle = `rgba(255, 235, 59, ${tutorialAlpha})`;
+          ctx.fillText('💡 点击让肥啾上升，松开悬停', W / 2, H - 72);
+          ctx.font = '12px monospace';
+          ctx.fillStyle = `rgba(200, 200, 200, ${tutorialAlpha * 0.8})`;
+          ctx.fillText('穿过障碍物通道即可得分', W / 2, H - 54);
+        }
+      }
+    }
+
+
+    /**
+     * drawRadioBtn() — 绘制单选按钮（外圈+内圈+标签文字）
+     *
+     * @param {number} x — 圆心 X 坐标
+     * @param {number} y — 圆心 Y 坐标
+     * @param {boolean} isSelected — 是否选中
+     * @param {string} label — 下方标签文字
+     * 返回：无
+     */
+    function drawRadioBtn(x, y, isSelected, label) {
+      // 外圈
+      ctx.beginPath();
+      ctx.arc(x, y, RADIO_BTN.radius, 0, Math.PI * 2);
+      ctx.fillStyle = isSelected ? '#ffca28' : 'rgba(255, 255, 255, 0.15)';
+      ctx.fill();
+      ctx.strokeStyle = isSelected ? '#ffd54f' : 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // 内圈
+      if (isSelected) {
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+      }
+      
+      // 标签
+      ctx.font = isSelected ? 'bold 14px monospace' : '14px monospace';
+      ctx.fillStyle = isSelected ? '#ffca28' : 'rgba(255, 255, 255, 0.7)';
+      ctx.fillText(label, x, y + 28);
+    }
+
+
+    /**
+     * drawGameOverScreen() — 绘制游戏结束/结算界面
+     *
+     * 绘制层次：
+     * 1. 径向半透明遮罩（中心稍亮，边缘更暗）
+     * 2. 游戏结束标题（红色，shadowBlur=20 发光）
+     * 3. 存活时间：xx 秒
+     * 4. 评价文字（按时间分档）：
+     *    - >=60秒：太厉害了！(#ffeb3b)
+     *    - >=45秒：非常棒！(#ffe082)
+     *    - >=30秒：很不错！(#fff59d)
+     *    - >=15秒：还行哦~(#fff9c4)
+     *    - <15秒：继续加油！(#ffd54f)
+     * 5. 再来一局按钮（绿色渐变，悬停高亮）
+     * 6. 返回开始页面按钮（蓝色渐变，悬停高亮）
+     * 7. 底部操作提示
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawGameOverScreen() {
+      const overlayGrad = ctx.createRadialGradient(W/2, H/2, 100, W/2, H/2, 400);
+      overlayGrad.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
+      overlayGrad.addColorStop(1, 'rgba(0, 0, 0, 0.8)');
+      ctx.fillStyle = overlayGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      const secs = Math.floor(frameCount / 60);
+      
+      // 游戏结束标题
+      ctx.shadowColor = '#ff4444';
+      ctx.shadowBlur = 20;
+      ctx.font = 'bold 48px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ff4444';
+      ctx.fillText('游戏结束', W / 2, H / 2 - 70);
+      ctx.shadowBlur = 0;
+
+      // 得分显示
+      ctx.font = 'bold 28px monospace';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('存活时间：' + secs + '秒', W / 2, H / 2 - 20);
+      
+      // 根据分数显示评价
+      let rating = '继续加油！';
+      let ratingColor = '#ffd54f';
+      if (secs >= 60) { rating = '太厉害了！'; ratingColor = '#ffeb3b'; }
+      else if (secs >= 45) { rating = '非常棒！'; ratingColor = '#ffe082'; }
+      else if (secs >= 30) { rating = '很不错！'; ratingColor = '#fff59d'; }
+      else if (secs >= 15) { rating = '还行哦~'; ratingColor = '#fff9c4'; }
+      
+      ctx.font = 'bold 18px monospace';
+      ctx.fillStyle = ratingColor;
+      ctx.fillText(rating, W / 2, H / 2 + 15);
+
+      // 重新开始按钮
+      const restartBtnY = H / 2 + 50;
+      const btnW = 180;
+      const btnH = 50;
+      const restartBtnX = W / 2 - btnW / 2;
+      const isHovering = isHoveringRestartBtn;
+      
+      // 按钮阴影
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+      ctx.shadowBlur = isHovering ? 12 : 6;
+      
+      // 按钮渐变
+      const btnGrad = ctx.createLinearGradient(restartBtnX, restartBtnY, restartBtnX, restartBtnY + btnH);
+      btnGrad.addColorStop(0, isHovering ? '#66bb6a' : '#4caf50');
+      btnGrad.addColorStop(1, isHovering ? '#43a047' : '#388e3c');
+      ctx.fillStyle = btnGrad;
+      ctx.beginPath();
+      ctx.roundRect(restartBtnX, restartBtnY, btnW, btnH, 10);
+      ctx.fill();
+      
+      // 按钮边框
+      ctx.strokeStyle = isHovering ? '#fff' : 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // 清除阴影
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      
+      // 按钮文字
+      ctx.font = 'bold 18px monospace';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('再来一局', W / 2, restartBtnY + btnH / 2);
+      
+      // 返回开始页面按钮
+      const returnBtnY = restartBtnY + btnH + 20;
+      const returnBtnX = W / 2 - btnW / 2;
+      const isHoveringReturn = isHoveringReturnBtn;
+      
+      // 按钮阴影
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+      ctx.shadowBlur = isHoveringReturn ? 12 : 6;
+      
+      // 按钮渐变（蓝色系）
+      const returnBtnGrad = ctx.createLinearGradient(returnBtnX, returnBtnY, returnBtnX, returnBtnY + btnH);
+      returnBtnGrad.addColorStop(0, isHoveringReturn ? '#42a5f5' : '#2196f3');
+      returnBtnGrad.addColorStop(1, isHoveringReturn ? '#1e88e5' : '#1976d2');
+      ctx.fillStyle = returnBtnGrad;
+      ctx.beginPath();
+      ctx.roundRect(returnBtnX, returnBtnY, btnW, btnH, 10);
+      ctx.fill();
+      
+      // 按钮边框
+      ctx.strokeStyle = isHoveringReturn ? '#fff' : 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // 清除阴影
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      
+      // 按钮文字
+      ctx.font = 'bold 18px monospace';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('返回开始页面', W / 2, returnBtnY + btnH / 2);
+      
+      // 提示
+      ctx.font = '12px monospace';
+      ctx.fillStyle = 'rgba(200, 200, 200, 0.6)';
+      ctx.fillText('点击按钮选择操作', W / 2, returnBtnY + btnH + 20);
+    }
+
+
+    /**
+     * drawHoverIndicator() — 绘制肥啾悬停状态指示器
+     *
+     * 在鸟上方显示带发光效果的 ... 省略号符号，
+     * 仅当 hoverTimer 在 (0, HOVER_FRAMES) 区间内时显示。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function drawHoverIndicator() {
+      if (bird.hoverTimer > 0 && bird.hoverTimer < HOVER_FRAMES) {
+        const bx = bird.x + 14;
+        const by = Math.round(bird.y);
+        
+        // 发光效果
+        ctx.shadowColor = '#ffffaa';
+        ctx.shadowBlur = 10;
+        ctx.font = 'bold 16px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffaa';
+        ctx.fillText('⋯', bx, by - 10);
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    /* ================================================================
+     *  六、游戏逻辑函数 — 控制障碍物生成、肥啾物理、碰撞检测等
+     * ================================================================ */
+
+
+    /**
+     * spawnObstacle() — 在屏幕右侧生成一组新障碍物（非对称布局 + 随机通道位置）
+     *
+     * 核心算法：
+     * 1. 计算可用垂直空间 = maxBottom - minTop - gapSize
+     * 2. 随机决定 obsType：
+     *    - 70%：上下均有 (both)
+     *    - 15%/20%（20秒后）：仅上 (top)
+     *    - 15%/20%：仅下 (bottom)
+     * 3. 通道位置随机分布，20秒前波动 gapRandomOffset*0.8，
+     *    20秒后增加因子 linearRamp 至 gapRandomOffset+30
+     * 4. 边界约束：上柱最小 30px，下柱底部离地至少 30px，单侧最小 80px
+     * 5. 生成场景类型和固定种子
+     *
+     * 参数：无（读取 frameCount, gapSize, obstacles）
+     * 返回：无（push 到 obstacles 数组）
+     */
+    function spawnObstacle() {
+      const minTop = 30;                      // 上柱子最少要 30px 高
+      const maxBottom = GROUND_Y - 30;        // 下柱子底部要留出 30px
+      const available = maxBottom - minTop - gapSize; // 可以自由调整的范围
+      if (available < 30) return;             // 范围太小就不生成了
+      
+      // 决定障碍物类型（非对称布局）
+      const singleSideProb = frameCount < DIFFICULTY_START ? 0.15 : 0.2; // 20秒后单侧概率提升
+      const rand = Math.random();
+      let obsType;
+      if (rand < 0.7) {
+        obsType = 'both';      // 70%：上下都有
+      } else if (rand < 0.7 + singleSideProb) {
+        obsType = 'top';       // 15%/20%：仅上有
+      } else {
+        obsType = 'bottom';    // 15%/20%：仅下有
+      }
+      
+      // 通道位置在整个可用范围内随机分布，忽高忽低
+      let gapCenter;
+      const centerY = (minTop + maxBottom) / 2;
+      
+      // 根据难度调整随机落差
+      const difficultyOffset = difficultyConfig.gapRandomOffset;
+      
+      if (frameCount < DIFFICULTY_START) {
+        gapCenter = centerY + (Math.random() - 0.5) * difficultyOffset * 0.8;
+      } else {
+        const difficultyFactor = Math.min(1, (frameCount - DIFFICULTY_START) / 3600);
+        gapCenter = centerY + (Math.random() - 0.5) * (difficultyOffset + difficultyFactor * 30);
+      }
+      
+      // 确保通道不会超出边界
+      gapCenter = Math.max(minTop + gapSize / 2, Math.min(maxBottom - gapSize / 2, gapCenter));
+      
+      let topH, bottomTop;
+      
+      if (obsType === 'both') {
+        // 上下都有
+        topH = Math.floor(gapCenter - gapSize / 2);
+        bottomTop = Math.ceil(gapCenter + gapSize / 2);
+      } else if (obsType === 'top') {
+        // 仅上有：从顶部延伸至随机Y坐标，确保下方有足够空间
+        const minTopHeight = 80; // 最小高度保证挑战
+        const maxTopHeight = GROUND_Y - gapSize - minTop;
+        topH = minTopHeight + Math.floor(Math.random() * (maxTopHeight - minTopHeight));
+        bottomTop = GROUND_Y; // 下障碍物不存在
+      } else {
+        // 仅下有：从地面向上延伸至随机Y坐标
+        const minBottomHeight = 80;
+        const maxBottomTop = maxBottom - minBottomHeight;
+        bottomTop = minTop + Math.floor(Math.random() * (maxBottomTop - minTop));
+        topH = 0; // 上障碍物不存在
+      }
+      
+      // 随机选择场景特定的障碍物类型
+      const sceneType = getSceneObstacleType(W);
+      // 生成固定的种子，用于绘制时的随机细节（确保细节不随位置移动而变化）
+      const obstacleSeed = W * 10000 + obstacles.length * 1000 + Math.floor(Math.random() * 1000);
+      
+      obstacles.push({ 
+        x: W, 
+        topH: topH, 
+        bottomTop: bottomTop, 
+        type: sceneType,
+        sceneType: sceneType,
+        obsType: obsType,
+        seed: obstacleSeed  // 固定种子，确保绘制细节稳定
+      });
+    }
+
+
+    /**
+     * updateBird() — 更新肥啾物理状态（核心手感逻辑：重力/上升/悬停/碰撞）
+     *
+     * 物理状态机：
+     * 1. 按住空格（spaceHeld=true）：每帧施加 HOLD_LIFT 上升力，阻止悬停
+     * 2. 松开空格：
+     *    a. 到达最高点或正在下落（vy >= 0）且悬停未满 HOVER_FRAMES 帧：
+     *       - vy = 0，鸟定在空中，hoverTimer++
+     *       - 悬停首帧播放 playHoverSound()
+     *    b. 否则：施加 GRAVITY 重力加速下落
+     * 3. 速度钳位：[MAX_UP(-12), MAX_FALL(15)]
+     * 4. 地面碰撞（先计算 nextY = bird.y + bird.vy）：
+     *    - 若会穿地：卡在地面位置，触发 gameOver（安全期内不触发）
+     *    - 否则正常更新位置
+     * 5. 天花板碰撞：反弹且速度减半
+     * 6. 翅膀动画：每 8 帧切换 wingFrame（0=上位，1=下位）
+     *
+     * 悬停机制是手感的精髓：每次跳跃到最高点后短暂悬停 0.5 秒，
+     * 给玩家缓冲时间调整节奏，使操作更友好。
+     *
+     * 参数：无（操作全局 bird 对象）
+     * 返回：无
+     */
+    function updateBird() {
+      // ---- 按住空格：持续上升，不触发悬停 ----
+      if (spaceHeld) {
+        bird.vy += HOLD_LIFT();            // 每帧加一点向上速度
+        bird.hoverTimer = HOVER_FRAMES;  // 把悬停计时器设满，阻止悬停
+      }
+      // ---- 松开空格：受重力下落，到最高点时悬停 ----
+      else {
+        // 如果速度 >= 0（开始下落或刚好到顶）且还没悬停够
+        if (bird.vy >= 0 && bird.hoverTimer < HOVER_FRAMES) {
+          bird.vy = 0;                   // 速度归零，定在空中
+          bird.hoverTimer++;             // 悬停计时 +1
+          // 在悬停开始时播放音效
+          if (bird.hoverTimer === 1) {
+            playHoverSound();
+          }
+        } else {
+          bird.vy += GRAVITY();            // 正常受重力加速下落
+        }
+      }
+
+      // ---- 限制最大上升/下落速度，防止飞太快穿模 ----
+      bird.vy = Math.max(MAX_UP, Math.min(MAX_FALL, bird.vy));
+      
+      // ---- 更新位置前先检查地面碰撞，防止穿过地面 ----
+      const nextY = bird.y + bird.vy;
+      if (nextY + bird.h > GROUND_Y) {
+        bird.y = GROUND_Y - bird.h;      // 卡在地面位置，不能穿过
+        bird.vy = 0;                     // 速度归零
+        if (safeTimer <= 0) {
+          gameOver();                    // 直接死亡
+          return;
+        }
+      } else {
+        bird.y = nextY;                   // 正常更新位置
+      }
+
+      // ---- 碰到天花板，弹回来 ----
+      if (bird.y <= 0) {
+        bird.y = 1;
+        bird.vy = Math.abs(bird.vy) * 0.5; // 碰到天花板反弹，速度减半
+      }
+
+      // ---- 翅膀扇动动画（每 8 帧切换一次） ----
+      bird.wingTimer++;
+      if (bird.wingTimer >= 8) {
+        bird.wingTimer = 0;
+        bird.wingFrame = 1 - bird.wingFrame;  // 在 0 和 1 之间切换
+      }
+    }
+
+
+    /**
+     * updateObstacles() — 控制障碍物生成计时与向左滚动
+     *
+     * 1. spawnTimer 累加，达到 spawnInterval 时调用 spawnObstacle()
+     * 2. 遍历 obstacles（从后向前避免索引偏移），每个障碍物 x 减去 gameSpeed，
+     *    若完全移出左侧屏幕（x + OBS_W < 0）则从数组中移除
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function updateObstacles() {
+      // ---- 计时器到了就生成一组新障碍物 ----
+      spawnTimer++;
+      if (spawnTimer >= spawnInterval) {
+        spawnTimer = 0;
+        spawnObstacle();
+      }
+
+      // ---- 所有已有障碍物向左移动，超出屏幕的删除掉 ----
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].x -= gameSpeed;
+        if (obstacles[i].x + OBS_W < 0) {  // 完全移出左侧屏幕
+          obstacles.splice(i, 1);           // 从数组中删除
+        }
+      }
+    }
+
+
+    /**
+     * updateSpeed() — 随游戏进程推进逐步增加难度
+     *
+     * 难度曲线分两阶段：
+     *
+     * 阶段一：前 20 秒（休闲期，frameCount < DIFFICULTY_START = 1200）
+     * - 速度线性增长：INITIAL_SPEED + frameCount * SPEED_INC，上限 MAX_SPEED
+     * - 间隙：INITIAL_GAP +/- gapVariation/2，不低于 MIN_GAP_BEFORE_20S
+     * - 间隔：INITIAL_INTERVAL +/- 30，不低于 MIN_INTERVAL_BEFORE_20S
+     *
+     * 阶段二：20 秒后（困难递增期）
+     * - difficulty = min(1, elapsed/5400)，90 秒内从 0 线性增长到 1
+     * - 间隙线性缩小：从 INITIAL_GAP 过渡到 MIN_GAP_AFTER_20S
+     * - 间隔线性缩短：从 INITIAL_INTERVAL 过渡到 MIN_INTERVAL_AFTER_20S
+     * - 随机波动幅度随 difficulty 增加而减小（难度更稳定）
+     *
+     * 若当前屏幕障碍物数量不足（< currentMinObsCount），
+     * 强制将生成间隔降至 <=50（20秒前）或 <=40（20秒后）。
+     *
+     * 参数：无（修改 gameSpeed, gapSize, spawnInterval）
+     * 返回：无
+     */
+    function updateSpeed() {
+      // ---- 速度逐步提升 ----
+      gameSpeed = Math.min(MAX_SPEED(), INITIAL_SPEED() + frameCount * SPEED_INC());
+      
+      // ---- 获取当前难度阶段的参数 ----
+      const isAfter20S = frameCount >= DIFFICULTY_START;
+      const currentMinGap = isAfter20S ? MIN_GAP_AFTER_20S() : MIN_GAP_BEFORE_20S();
+      const currentMinInterval = isAfter20S ? MIN_INTERVAL_AFTER_20S() : MIN_INTERVAL_BEFORE_20S();
+      const currentMinObsCount = isAfter20S ? MIN_OBS_COUNT_AFTER_20S() : MIN_OBS_COUNT_BEFORE_20S();
+      
+      if (frameCount < DIFFICULTY_START) {
+        // 20秒前：保持较大间隙和间隔，但有波动
+        const gapVariation = difficultyConfig.gapVariation; // 间隙波动幅度
+        gapSize = Math.max(currentMinGap, INITIAL_GAP() + (Math.random() - 0.5) * gapVariation);
+        
+        // 横向间隔：忽大忽小，但保证画面内有最少障碍物数
+        const intervalVariation = 60;
+        let targetInterval = Math.max(currentMinInterval, INITIAL_INTERVAL() + (Math.random() - 0.5) * intervalVariation);
+        
+        // 确保画面内有足够的障碍物
+        const currentObsCount = obstacles.length;
+        if (currentObsCount < currentMinObsCount) {
+          targetInterval = Math.min(targetInterval, 50); // 加速生成
+        }
+        spawnInterval = Math.floor(targetInterval);
+      } else {
+        // 20秒后：难度逐渐增加
+        const elapsed = frameCount - DIFFICULTY_START;
+        const difficulty = Math.min(1, elapsed / 5400); // 90秒内难度从0增加到1
+        
+        // 纵向间隙：缓慢变小，同时忽大忽小
+        const baseGap = INITIAL_GAP() - (INITIAL_GAP() - currentMinGap) * difficulty;
+        const gapVariation = difficultyConfig.gapVariation + (1 - difficulty) * 40; // 波动幅度随难度降低
+        gapSize = Math.max(currentMinGap, baseGap + (Math.random() - 0.5) * gapVariation);
+        
+        // 横向间隔：缓慢变小，同时忽大忽小
+        const baseInterval = INITIAL_INTERVAL() - (INITIAL_INTERVAL() - currentMinInterval) * difficulty;
+        const intervalVariation = 50 + (1 - difficulty) * 30; // 波动幅度随难度降低
+        let targetInterval = Math.max(currentMinInterval, baseInterval + (Math.random() - 0.5) * intervalVariation);
+        
+        // 确保画面内有足够的障碍物
+        const currentObsCount = obstacles.length;
+        if (currentObsCount < currentMinObsCount) {
+          targetInterval = Math.min(targetInterval, 40); // 加速生成
+        }
+        spawnInterval = Math.floor(targetInterval);
+      }
+    }
+
+
+    /**
+     * updateClouds() — 更新云朵/星星/火把的位置和动画状态
+     *
+     * 所有元素以各自速度向左滚动（c.speed * gameSpeed），
+     * 出左边界后从右侧重新生成并随机 Y 位置。
+     * 额外动画更新：
+     * - 星星（type=star）：twinkle 相位递增，在 drawSceneElements 中由 sin 控制 alpha
+     * - 火把（type=torch）：flicker 递增 0.15，在 drawTorch 中产生摇曳偏移
+     *
+     * 参数：无（操作全局 clouds 数组）
+     * 返回：无
+     */
+    function updateClouds() {
+      for (const c of clouds) {
+        c.x -= gameSpeed * c.speed;   // 每朵云有自己的滚动速度
+        if (c.x + c.w < 0) {          // 移出左侧屏幕后，从右侧重新出现
+          c.x = W + Math.random() * 100;
+          c.y = 30 + Math.random() * 180;
+        }
+        // 更新星星闪烁（每帧更新，让星星有轻微的闪烁效果）
+        if (c.type === 'star') {
+          c.twinkle += c.twinkleSpeed;
+        }
+        // 更新火把摇曳
+        if (c.type === 'torch') {
+          c.flicker += 0.15;
+        }
+      }
+    }
+
+
+    /**
+     * checkCollisions() — AABB（轴对齐包围盒）碰撞检测
+     *
+     * 碰撞盒比鸟实际尺寸每边收缩 2px（即宽高各减 4px），
+     * 让碰撞判定更宽容，提升玩家体验。
+     *
+     * 检测流程：
+     * 1. safeTimer > 0 时跳过检测（安全期保护）
+     * 2. 遍历 obstacles，检查鸟的碰撞盒与障碍物水平方向是否重叠
+     * 3. 若水平重叠，根据 obsType 检测垂直方向：
+     *    - both：鸟顶 < o.topH 或 鸟底 > o.bottomTop
+     *    - top：仅鸟顶 < o.topH
+     *    - bottom：仅鸟底 > o.bottomTop
+     * 4. 碰撞发生时调用 startDying()
+     *
+     * 参数：无（读取 bird, obstacles, safeTimer）
+     * 返回：无
+     */
+    function checkCollisions() {
+      if (safeTimer > 0) return;  // 安全期内不检测
+
+      // 鸟的碰撞盒比实际显示小 4 像素（每边缩 2 像素），让碰撞更宽容
+      const bx = bird.x + 2;
+      const by = bird.y + 2;
+      const bw = bird.w - 4;
+      const bh = bird.h - 4;
+
+      // 遍历所有障碍物，检查是否重叠
+      for (const o of obstacles) {
+        // 水平方向有重叠
+        if (bx + bw > o.x && bx < o.x + OBS_W) {
+          const obsType = o.obsType || 'both';
+          
+          // 根据obsType决定检测哪些障碍物
+          let collision = false;
+          
+          if (obsType === 'both') {
+            // 上下都有：检测上柱子和下柱子
+            collision = by < o.topH || by + bh > o.bottomTop;
+          } else if (obsType === 'top') {
+            // 仅上有：只检测上柱子
+            collision = by < o.topH;
+          } else {
+            // 仅下有：只检测下柱子
+            collision = by + bh > o.bottomTop;
+          }
+          
+          if (collision) {
+            startDying();  // 进入死亡掉落动画
+            return;
+          }
+        }
+      }
+    }
+
+
+    /**
+     * startDying() — 进入死亡掉落动画状态
+     *
+     * 仅在 gameState === playing 时生效（防止重复触发）。
+     * 设置状态为 dying，给鸟 2px/帧的下落初速度，
+     * 阻止悬停（hoverTimer = HOVER_FRAMES），播放碰撞音效，
+     * 在鸟位置生成 15 个 crash 类型粒子。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function startDying() {
+      if (gameState === 'playing') {
+        gameState = 'dying';
+        bird.vy = 2;
+        bird.hoverTimer = HOVER_FRAMES;
+        playCrashSound();
+        createParticles(bird.x + 14, bird.y + 12, 15, 'crash');
+      }
+    }
+
+
+    /**
+     * gameOver() — 直接结束游戏（撞地时调用，不经过掉落动画阶段）
+     *
+     * 仅在 gameState === playing 时生效。
+     * 状态直接切换为 gameover 并播放碰撞音效。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function gameOver() {
+      if (gameState === 'playing') {
+        gameState = 'gameover';
+        playCrashSound();                 // 播放碰撞音效
+      }
+    }
+
+
+    /**
+     * updateFixed() — 固定时间步长（1/60 秒）的游戏逻辑更新
+     *
+     * 这是每 16.67ms 执行一次的核心更新函数：
+     *
+     * playing 状态：
+     * - frameCount++（统一按 60fps 计算，与实际帧率解耦）
+     * - safeTimer 递减（若 > 0）
+     * - platformX 向左移动 gameSpeed
+     * - 依次调用：updateBird() -> updateObstacles() -> updateSpeed()
+     *   -> updateClouds() -> updateParticles() -> checkCollisions()
+     * - tutorialTimer++
+     * - 每 8 帧且鸟在上升时（vy < 0）生成 1 个 score 粒子
+     *
+     * dying 状态：
+     * - rotation 每帧增加 0.08 弧度，最大值 Math.PI（180 度翻转）
+     * - 受重力下落，速度上限 MAX_FALL
+     * - 翅膀继续扇动
+     * - 落地后切换为 gameover 状态
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function updateFixed() {
+      // ---- 正常游戏中的更新 ----
+      if (gameState === 'playing') {
+        frameCount++;                         // 帧数 +1（统一按60fps计算）
+        if (safeTimer > 0) safeTimer--;       // 安全期倒计时
+        platformX -= gameSpeed;               // 起飞平台向左滚动
+        updateBird();                         // 更新肥啾物理
+        updateObstacles();                    // 更新障碍物
+        updateSpeed();                        // 更新游戏速度
+        updateClouds();                       // 更新云朵
+        updateParticles();                    // 更新粒子
+        checkCollisions();                    // 检测碰撞
+        tutorialTimer++;                     // 教程计时
+        
+        // 每隔一定帧数生成飞行轨迹粒子
+        if (frameCount % 8 === 0 && bird.vy < 0) {
+          createParticles(bird.x + 14, bird.y + 12, 1, 'score');
+        }
+      }
+      // ---- 死亡掉落中的更新 ----
+      else if (gameState === 'dying') {
+        bird.rotation = Math.min(Math.PI, bird.rotation + 0.08); // 每帧转 0.08 弧度，最多转 180°
+        bird.vy += GRAVITY();           // 受重力下落
+        bird.vy = Math.min(MAX_FALL, bird.vy);
+        bird.y += bird.vy;
+
+        // 翅膀继续扇动
+        bird.wingTimer++;
+        if (bird.wingTimer >= 8) {
+          bird.wingTimer = 0;
+          bird.wingFrame = 1 - bird.wingFrame;
+        }
+
+        // 落到地面 → 弹出结算画面
+        if (bird.y + bird.h >= GROUND_Y) {
+          bird.y = GROUND_Y - bird.h;
+          gameState = 'gameover';
+        }
+      }
+    }
+
+    /* ================================================================
+     *  七、主循环 — 每秒执行约 60 次，每次先更新逻辑再重新绘制
+     * ================================================================ */
+
+
+    /**
+     * update() — 主更新入口（时间累积 + 固定时间步长执行）
+     *
+     * 使用 performance.now() 获取高精度时间计算 deltaTime。
+     * 累积时间按固定步长（fixedStep = 1000/60）消耗，
+     * 每次消耗调用一次 updateFixed()。
+     *
+     * 防卡顿保护：
+     * - 若累积时间 > 500ms（如标签页切换回来后），重置为 fixedStep
+     * - 每帧最多执行 maxUpdates=5 次 updateFixed，防止长时间卡顿后
+     *   一次性追帧导致物理状态异常
+     *
+     * 此设计保证不同刷新率设备上游戏速度一致：
+     * 60Hz 屏幕典型每帧执行 1 次，120Hz 屏幕每帧约 2 次但每次更新量减半。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function update() {
+      const currentTime = performance.now();
+      const deltaTime = currentTime - lastTime;
+      lastTime = currentTime;
+      
+      // 累积时间，使用固定时间步长更新物理
+      accumulatedTime += deltaTime;
+      const fixedStep = 1000 / 60; // 60fps 对应的毫秒数
+      
+      // 防止accumulatedTime过大导致卡顿（限制最大累积时间）
+      if (accumulatedTime > 500) {
+        accumulatedTime = fixedStep;
+      }
+      
+      // 限制每帧最多执行的更新次数，防止卡顿
+      let updates = 0;
+      const maxUpdates = 5;
+      while (accumulatedTime >= fixedStep && updates < maxUpdates) {
+        updateFixed();
+        accumulatedTime -= fixedStep;
+        updates++;
+      }
+    }
+
+
+    /**
+     * draw() — 主绘制入口（根据 gameState 决定绘制内容）
+     *
+     * 绘制状态机：
+     * - start：背景 + 平台 + 鸟 + 开始界面（遮罩 + 文字 + 按钮 + 选项）
+     * - 其他（playing/dying/gameover）：背景 + 障碍物 + 粒子 + 鸟 +
+     *   悬停指示器(非dying时) + 平台(若仍在屏幕内) + HUD +
+     *   结算界面(仅gameover时)
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function draw() {
+      // 清空画布
+      ctx.clearRect(0, 0, W, H);
+      
+      drawBackground();              // 先画背景（天空、云、地面）
+
+      if (gameState === 'start') {
+        // 开始界面：画平台、鸟、半透明遮罩 + 文字
+        drawPlatform();
+        drawBird();
+        drawStartScreen();
+      } else {
+        // 游戏中/死亡/结算：画障碍物、鸟、平台（如果还在屏幕内）、HUD
+        drawObstacles();
+        drawParticles();             // 绘制粒子效果
+        drawBird();
+        if (gameState !== 'dying') {
+          drawHoverIndicator();      // 悬停提示（死亡掉落时不显示）
+        }
+        if (platformX + PLATFORM_W > 0) {
+          drawPlatform();            // 平台还在屏幕内就画
+        }
+        drawHUD();
+        if (gameState === 'gameover') {
+          drawGameOverScreen();      // 结算画面
+        }
+      }
+    }
+
+
+    /**
+     * startGame() — 从开始界面启动游戏
+     *
+     * 执行顺序：
+     * 1. initAudio() — 初次启动时创建 AudioContext
+     * 2. 将鸟定位在平台正中央，给予上升初速度 LIFT()
+     * 3. 清空障碍物和粒子
+     * 4. 设置安全期：取 max(SAFE_FRAMES(), 60)，确保充足起飞时间
+     * 5. 切换 gameState 为 playing
+     * 6. 播放跳跃音效 + 生成 8 个 jump 粒子
+     * 7. startBGM() — 启动背景音乐
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function startGame() {
+      initAudio();
+      // 确保鸟站在平台正中央再起飞
+      bird.y = GROUND_Y - PLATFORM_H - 24;
+      bird.vy = LIFT();
+      bird.rotation = 0;
+      bird.hoverTimer = 0;
+      // 无障碍物、粒子干扰
+      obstacles = [];
+      particles = [];
+      // 安全期：至少60帧（1秒），确保即使快速点击也有充足起飞时间
+      safeTimer = Math.max(SAFE_FRAMES(), 60);
+      gameState = 'playing';
+      spaceHeld = false;
+      playJumpSound();
+      createParticles(BIRD_X + 14, bird.y + 12, 8, 'jump');
+      startBGM();
+    }
+
+    /**
+     * loop() — 游戏主循环，浏览器每秒调用约 60 次
+     * 先 update（更新逻辑）→ 再 draw（重新绘制）
+     */
+    let animationId = null;
+    
+
+    /**
+     * loop() — 游戏主循环（requestAnimationFrame 驱动）
+     *
+     * 每帧执行顺序：update() -> draw()
+     * update 负责所有物理/逻辑更新（固定时间步长），
+     * draw 负责所有帧绘制操作。
+     * requestAnimationFrame 自动与浏览器刷新率同步。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function loop() {
+      update();
+      draw();
+      animationId = requestAnimationFrame(loop);
+    }
+    
+
+    /**
+     * restartGame() — 重新开始游戏
+     *
+     * 播放点击音效 -> reset()（重置全部数据）-> startGame()（立即开始）
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function restartGame() {
+      playClickSound();
+      reset();
+      startGame();
+    }
+    
+
+    /**
+     * returnToStartScreen() — 返回开始界面
+     *
+     * 播放点击音效 -> reset()（重置数据）-> 设置 gameState = start
+     * 同时清除重新开始和返回按钮的悬停状态。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function returnToStartScreen() {
+      playClickSound();
+      reset();
+      gameState = 'start';
+      isHoveringRestartBtn = false;
+      isHoveringReturnBtn = false;
+    }
+    
+
+    /**
+     * stopLoop() — 停止游戏主循环
+     *
+     * 调用 cancelAnimationFrame(animationId) 取消下一帧回调，
+     * 清空 animationId 引用。
+     *
+     * 参数：无
+     * 返回：无
+     */
+    function stopLoop() {
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+    }
+
+    /* ================================================================
+     *  八、事件监听 — 支持鼠标/触屏/键盘三端统一操作
+     * ================================================================ */
+
+    // ---- 统一的坐标转换工具 ----
+
+    /**
+     * getCanvasPos() — 将浏览器客户端坐标转换为画布逻辑坐标
+     *
+     * CSS 尺寸与逻辑尺寸可能不同，按比例映射：
+     * canvasX = (clientX - rect.left) * (W / rect.width)
+     *
+     * @param {number} clientX — 浏览器窗口客户端 X
+     * @param {number} clientY — 浏览器窗口客户端 Y
+     * @returns {{x: number, y: number}} 画布逻辑坐标
+     */
+    function getCanvasPos(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left) * (W / rect.width),
+        y: (clientY - rect.top) * (H / rect.height)
+      };
+    }
+
+    // ---- 统一的UI点击处理（开始页/结束页按钮、选项、静音）----
+
+    /**
+     * handleUIClick() — 统一的 UI 点击事件处理入口
+     *
+     * 根据 gameState 执行不同分支：
+     * - start：检测顺序：开始按钮 -> 场景单选 -> 难度单选 -> 皮肤单选
+     * - gameover：检测顺序：再来一局按钮 -> 返回开始页面按钮
+     * - 所有状态：检测右下角静音按钮区域 (W-130 ~ W, H-25 ~ H)
+     *
+     * 所有坐标与绘制函数（drawStartScreen/drawGameOverScreen）共用
+     * START_LAYOUT 常量或相同计算逻辑，保证点击区域精确对齐。
+     *
+     * @param {number} cx — 画布逻辑 X
+     * @param {number} cy — 画布逻辑 Y
+     * @returns {boolean} 是否命中某个 UI 交互元素
+     */
+    function handleUIClick(cx, cy) {
+      const L = START_LAYOUT;
+
+      if (gameState === 'start') {
+        // 开始游戏按钮
+        const btnX = W / 2 - L.btnW / 2;
+        if (cx >= btnX && cx <= btnX + L.btnW &&
+            cy >= L.btnY && cy <= L.btnY + L.btnH) {
+          playClickSound();
+          startGame();
+          return true;
+        }
+
+        // 场景选择
+        const sceneKeys = [SCENES.DESERT, SCENES.NIGHT, SCENES.DUNGEON];
+        for (let i = 0; i < 3; i++) {
+          const rx = L.sceneX + (i - 1) * L.sceneSpacing;
+          const ry = L.sceneBtnY;
+          const dist = Math.sqrt((cx - rx) ** 2 + (cy - ry) ** 2);
+          if (dist <= RADIO_BTN.touchRadius) {
+            setSceneMode(sceneKeys[i]);
+            return true;
+          }
+        }
+
+        // 难度选择
+        const diffKeys = [DIFFICULTY_LEVELS.LOW, DIFFICULTY_LEVELS.MEDIUM, DIFFICULTY_LEVELS.HIGH];
+        for (let i = 0; i < 3; i++) {
+          const rx = L.diffX + (i - 1) * L.diffSpacing;
+          const ry = L.diffBtnY;
+          const dist = Math.sqrt((cx - rx) ** 2 + (cy - ry) ** 2);
+          if (dist <= RADIO_BTN.touchRadius) {
+            setDifficulty(diffKeys[i]);
+            return true;
+          }
+        }
+
+        // 皮肤选择
+        const skinKeys = [SKINS.ORIGINAL, SKINS.YELLOW_CUTE, SKINS.BLUE_BIRD, SKINS.PINK_PARROT, SKINS.GREEN_FINCH];
+        for (let i = 0; i < 5; i++) {
+          const rx = W / 2 + (i - 2) * L.skinSpacing;
+          const ry = L.skinBtnY;
+          const dist = Math.sqrt((cx - rx) ** 2 + (cy - ry) ** 2);
+          if (dist <= RADIO_BTN.touchRadius) {
+            setSkin(skinKeys[i]);
+            return true;
+          }
+        }
+      } else if (gameState === 'gameover') {
+        const btnW = 180;
+        const btnH = 50;
+        const restartBtnY = H / 2 + 50;
+        const restartBtnX = W / 2 - btnW / 2;
+        const returnBtnY = restartBtnY + btnH + 20;
+        const returnBtnX = W / 2 - btnW / 2;
+
+        if (cx >= restartBtnX && cx <= restartBtnX + btnW &&
+            cy >= restartBtnY && cy <= restartBtnY + btnH) {
+          playClickSound();
+          restartGame();
+          return true;
+        }
+
+        if (cx >= returnBtnX && cx <= returnBtnX + btnW &&
+            cy >= returnBtnY && cy <= returnBtnY + btnH) {
+          playClickSound();
+          returnToStartScreen();
+          return true;
+        }
+      }
+
+      // 静音按钮（游戏中、开始页、结束页均可点击）
+      // 静音按钮区域：右下角 (W-130, H-25) 到 (W, H)
+      if (cx >= W - 130 && cx <= W && cy >= H - 25 && cy <= H) {
+        toggleMute();
+        return true;
+      }
+
+      return false;
+    }
+
+    // ---- 触屏操作：统一处理所有状态 ----
+    let touchHandledByUI = false; // 标记本次touch是否已被UI消费
+
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const pos = getCanvasPos(touch.clientX, touch.clientY);
+
+      // 优先处理UI点击（开始页/结束页的按钮、选项、静音）
+      if (handleUIClick(pos.x, pos.y)) {
+        touchHandledByUI = true;
+        return;
+      }
+      touchHandledByUI = false;
+
+      // 游戏进行中：触摸=按住空格（持续上升）
+      if (gameState === 'playing') {
+        if (!spaceHeld) {
+          bird.vy = LIFT();
+          bird.hoverTimer = 0;
+          playJumpSound();
+        }
+        spaceHeld = true;
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault(); // 防止页面滚动
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (!touchHandledByUI && gameState === 'playing') {
+        spaceHeld = false;
+      }
+      touchHandledByUI = false;
+    }, { passive: false });
+
+    // ---- 鼠标点击（桌面端）----
+    canvas.addEventListener('click', (e) => {
+      const pos = getCanvasPos(e.clientX, e.clientY);
+
+      // 先尝试处理UI点击
+      if (handleUIClick(pos.x, pos.y)) {
+        return;
+      }
+
+      // 游戏中点击画布=跳跃（桌面端方便操作）
+      if (gameState === 'playing') {
+        if (!spaceHeld) {
+          bird.vy = LIFT();
+          bird.hoverTimer = 0;
+          playJumpSound();
+        }
+        spaceHeld = true;
+      }
+    });
+
+    // 鼠标松开时停止持续上升（配合click的spaceHeld=true）
+    canvas.addEventListener('mouseup', () => {
+      if (gameState === 'playing') {
+        spaceHeld = false;
+      }
+    });
+
+    // ---- 鼠标移动：检测悬停状态（仅桌面端有效）----
+    canvas.addEventListener('mousemove', (e) => {
+      const pos = getCanvasPos(e.clientX, e.clientY);
+      mouseX = pos.x;
+      mouseY = pos.y;
+
+      if (gameState === 'start') {
+        const L = START_LAYOUT;
+        const btnX = W / 2 - L.btnW / 2;
+        isHoveringStartBtn = mouseX >= btnX && mouseX <= btnX + L.btnW &&
+                            mouseY >= L.btnY && mouseY <= L.btnY + L.btnH;
+        canvas.style.cursor = isHoveringStartBtn ? 'pointer' : 'default';
+      } else if (gameState === 'gameover') {
+        const btnW = 180;
+        const btnH = 50;
+        const restartBtnY = H / 2 + 50;
+        const restartBtnX = W / 2 - btnW / 2;
+        const returnBtnY = restartBtnY + btnH + 20;
+        const returnBtnX = W / 2 - btnW / 2;
+
+        isHoveringRestartBtn = mouseX >= restartBtnX && mouseX <= restartBtnX + btnW &&
+                               mouseY >= restartBtnY && mouseY <= restartBtnY + btnH;
+        isHoveringReturnBtn = mouseX >= returnBtnX && mouseX <= returnBtnX + btnW &&
+                              mouseY >= returnBtnY && mouseY <= returnBtnY + btnH;
+        canvas.style.cursor = (isHoveringRestartBtn || isHoveringReturnBtn) ? 'pointer' : 'default';
+      } else if (gameState === 'playing') {
+        // 游戏中鼠标移动时也检测静音按钮悬停
+        const isHoveringMute = mouseX >= W - 130 && mouseX <= W && mouseY >= H - 25 && mouseY <= H;
+        canvas.style.cursor = isHoveringMute ? 'pointer' : 'default';
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      isHoveringStartBtn = false;
+      isHoveringRestartBtn = false;
+      isHoveringReturnBtn = false;
+      canvas.style.cursor = 'default';
+    });
+
+    // ---- 按下空格：给肥啾一个上升速度 ----
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (gameState === 'playing') {
+          if (!spaceHeld) {
+            bird.vy = LIFT();
+            bird.hoverTimer = 0;
+            playJumpSound();
+          }
+          spaceHeld = true;
+        }
+      }
+      else if (e.code === 'KeyM') {
+        e.preventDefault();
+        toggleMute();
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        spaceHeld = false;
+      }
+    });
+
+    /* ================================================================
+     *  九、启动游戏 — 先重置数据，再启动主循环
+     * ================================================================ */
+    reset();
+    loop();
+  </script>
+</body>
+</html>
