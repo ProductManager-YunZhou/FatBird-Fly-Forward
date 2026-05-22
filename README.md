@@ -29,6 +29,10 @@ FatBird Fly Forward is a lightweight HTML5 casual game developed with Canvas. It
 
 ---
 
+<img width="1501" height="900" alt="image" src="https://github.com/user-attachments/assets/e2216794-a33f-4a54-ac62-d50a90653049" />
+
+---
+
 ## 技术栈 | Tech Stack
 - 渲染：HTML5 Canvas
 - 开发：原生 JavaScript (ES6+)
@@ -72,7 +76,9 @@ FatBird Fly Forward is a lightweight HTML5 casual game developed with Canvas. It
 - 推荐使用 Chrome / Firefox 等现代浏览器运行
 - 移动端支持触摸操作，桌面端支持键鼠操作
 - 纯前端项目，无需联网、无依赖、无广告
+- 游戏无法在iOS苹果端使用，因为苹果的沙盒机制禁止直接执行本地 HTML 文件，即使预览了 HTML，也不会执行 JavaScript
 
 - Recommended to run with modern browsers (Chrome / Firefox)
 - Supports touch operation on mobile, keyboard and mouse on desktop
 - Pure front-end project, no internet, no dependencies, no ads
+- The game is unavailable on iOS devices, because Apple’s sandbox mechanism prohibits direct execution of local HTML files. Even if the HTML is previewed, JavaScript will not run.
